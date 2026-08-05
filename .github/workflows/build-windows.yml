@@ -36,10 +36,15 @@ jobs:
         with:
           python-version: "3.12"
 
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build launcher stub
+        run: cargo build --release --manifest-path launcher-rs/Cargo.toml
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[build]"
+          pip install -e .
 
       - name: Build launcher
         run: >
