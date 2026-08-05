@@ -6,7 +6,7 @@ OpenSSL is linked).
 
 | OS            | Size | Source |
 |---------------|------|--------|
-| Windows (x86_64)| **1.14 MB** (1,191,424 bytes) | measured, rustc 1.97.1 |
+| Windows (x86_64)| **1.14 MB** (1,199,104 bytes) | measured, rustc 1.97.1 |
 | Linux (x86_64)  | _pending CI_ | tests.yml `rust` job |
 | macOS (arm64)   | _pending CI_ | tests.yml `rust` job |
 
