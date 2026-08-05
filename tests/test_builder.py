@@ -1,66 +1,49 @@
-"""Tests for launcher code generation and the PyInstaller command assembly.
+"""Tests for launcher assembly (stub + appended config) and the usage guide.
 
-The actual PyInstaller invocation is slow and OS-specific, so it runs in CI, not
-here. These tests cover the pure, deterministic parts: the generated entry
-script and the constructed command line.
+The launcher is now a prebuilt Rust stub with the non-secret config appended as
+a trailer. These tests cover the pure, deterministic parts: the appended-config
+trailer layout and the generated usage guide. The actual stub build runs in CI.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+import struct
 
 from editor import builder
-from editor.templates import render_entry_script, render_how_to_use
+from editor.builder import MAGIC, append_config
+from editor.templates import render_how_to_use
 from shared.config import LauncherConfig
 
 
-def test_entry_script_embeds_config_but_no_password() -> None:
+def test_append_config_writes_trailer() -> None:
+    cfg = LauncherConfig.create(
+        launcher_name="meks", host="1.2.3.4", username="root", port=22
+    )
+    stub = b"FAKE-STUB"
+    blob = append_config(stub, cfg)
+
+    # Layout: [stub][json][u64 LE length][magic]
+    assert blob.startswith(stub)
+    assert blob.endswith(MAGIC)
+    length = struct.unpack("<Q", blob[-16:-8])[0]
+    json_bytes = blob[-16 - length : -16]
+    assert b'"host": "1.2.3.4"' in json_bytes or b'"host":"1.2.3.4"' in json_bytes
+    # No password field can leak into the trailer — the type has none.
+    assert b"password" not in json_bytes
+
+
+def test_append_config_embeds_all_nonsecret_fields() -> None:
     cfg = LauncherConfig.create(
         launcher_name="meks", host="10.0.0.5", username="deploy", port=2200
     )
-    src = render_entry_script(cfg)
-    assert "10.0.0.5" in src
-    assert "deploy" in src
-    assert "2200" in src
-    assert cfg.credential_id in src
-    # No password is embedded: the config passes no password argument and the
-    # LauncherConfig type has no password field to hold one.
-    assert "password=" not in src
-    assert "password" not in {f.name for f in __import__("dataclasses").fields(cfg)}
-
-
-def test_entry_script_is_valid_python() -> None:
-    cfg = LauncherConfig.create(launcher_name="meks", host="h", username="u")
-    compile(render_entry_script(cfg), "<generated>", "exec")
-
-
-def test_pyinstaller_command_onefile_named_and_iconed(tmp_path: Path) -> None:
-    cmd = builder.pyinstaller_command(
-        entry_script=tmp_path / "entry.py",
-        output_name="meks.exe",
-        dist_dir=tmp_path / "dist",
-        work_dir=tmp_path / "work",
-        icon_path=tmp_path / "icon.ico",
-        paths=[tmp_path / "repo"],
-    )
-    assert "--onefile" in cmd
-    # ".exe" suffix stripped for PyInstaller's --name.
-    assert cmd[cmd.index("--name") + 1] == "meks"
-    assert "--icon" in cmd
-    assert cmd[cmd.index("--icon") + 1] == str(tmp_path / "icon.ico")
-    assert cmd[-1] == str(tmp_path / "entry.py")
-
-
-def test_pyinstaller_command_without_icon(tmp_path: Path) -> None:
-    cmd = builder.pyinstaller_command(
-        entry_script=tmp_path / "entry.py",
-        output_name="tool",
-        dist_dir=tmp_path / "dist",
-        work_dir=tmp_path / "work",
-        icon_path=None,
-        paths=[],
-    )
-    assert "--icon" not in cmd
+    blob = append_config(b"STUB", cfg)
+    length = struct.unpack("<Q", blob[-16:-8])[0]
+    json_bytes = blob[-16 - length : -16]
+    text = json_bytes.decode("utf-8")
+    assert "10.0.0.5" in text
+    assert "deploy" in text
+    assert "2200" in text
+    assert cfg.credential_id in text
 
 
 def test_how_to_use_uses_invocation_name_and_target() -> None:
@@ -79,18 +62,15 @@ def test_how_to_use_uses_invocation_name_and_target() -> None:
 def test_how_to_use_makes_credential_and_encryption_claims() -> None:
     cfg = LauncherConfig.create(launcher_name="meks", host="h", username="u")
     doc = render_how_to_use(cfg, "meks").lower()
-    # Reassurances the user asked for...
     assert "no password is stored" in doc
     assert "credential store" in doc
     assert "encrypted" in doc
-    # ...and the honest host-key caveat is present, not hidden.
     assert "man-in-the-middle" in doc or "trust-on-connect" in doc
 
 
 def test_how_to_use_contains_no_secret_value() -> None:
     cfg = LauncherConfig.create(launcher_name="meks", host="h", username="u")
     doc = render_how_to_use(cfg, "meks")
-    # It documents credential handling but embeds no actual password.
     assert "password=" not in doc
 
 
