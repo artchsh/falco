@@ -129,9 +129,32 @@ python build/build_launcher.py --name meks --host 203.0.113.10 --user deploy --p
 | Workflow                         | Runner          | Trigger            | Produces                    |
 |----------------------------------|-----------------|--------------------|-----------------------------|
 | `.github/workflows/tests.yml`        | ubuntu/win/macOS | push / PR          | test results (3-OS matrix)  |
-| `.github/workflows/build-windows.yml`| windows-latest  | manual (dispatch)  | `*.exe` artifact            |
-| `.github/workflows/build-macos.yml`  | macos-latest    | manual (dispatch)  | macOS binary artifact       |
-| `.github/workflows/build-linux.yml`  | ubuntu-latest   | manual (dispatch)  | Linux binary (optional)     |
+| `.github/workflows/release.yml`      | ubuntu/win/macOS | push to `main`     | **GitHub Release** with the Falco Editor for all 3 OSes |
+| `.github/workflows/build-windows.yml`| windows-latest  | manual (dispatch)  | `*.exe` launcher artifact   |
+| `.github/workflows/build-macos.yml`  | macos-latest    | manual (dispatch)  | macOS launcher artifact     |
+| `.github/workflows/build-linux.yml`  | ubuntu-latest   | manual (dispatch)  | Linux launcher (optional)   |
+
+### Releasing the Editor (automatic)
+
+Every push to `main` runs `release.yml`, which builds the **Falco Editor** on
+Windows, macOS and Linux (`build/build_editor.py`) and publishes them together
+as a new GitHub Release (`build-<run_number>`):
+
+- `falco-editor-windows.exe`
+- `falco-editor-macos`
+- `falco-editor-linux`
+
+The Editor authors and validates launcher configuration. Because a frozen
+binary has no Python toolchain inside it, **compiling launchers** is done from a
+Python environment (`build/build_launcher.py`) or the per-OS *build-** workflows.
+
+### Generated `how-to-use.md`
+
+Every launcher the Editor builds is accompanied by a small `how-to-use.md` next
+to the executable, written for humans and AI agents. It documents the commands,
+confirms **no password is embedded or leaked** (OS keystore only; never on
+argv/env/files/metadata), states the session is **SSH-encrypted**, and honestly
+notes the trust-on-connect host-key caveat.
 
 To build a signed-per-your-account launcher: open the repo's **Actions** tab →
 pick *build-windows* / *build-macos* → **Run workflow**, enter the launcher name,
@@ -207,6 +230,32 @@ meks.exe
 # Forget the stored password and re-prompt next run:
 meks.exe --reset-password
 ```
+
+### File transfer (SFTP)
+
+The launcher can also move files over the **same** connection and stored
+credential:
+
+```bash
+meks.exe --upload ./local-file /remote/path
+meks.exe --download /remote/file ./local-path
+meks.exe --list /remote/directory
+meks.exe --mkdir /remote/directory
+meks.exe --remove /remote/file
+meks.exe --move /remote/source /remote/destination
+
+# Recursive:
+meks.exe --upload-dir ./dist /var/www/site/dist
+meks.exe --download-dir /var/www/site/logs ./logs
+```
+
+Behaviour:
+
+- Progress is streamed to the terminal; names and directory structure are preserved.
+- Existing files are **never overwritten** unless `--overwrite` is given.
+- `--mkdirs` creates missing destination directories.
+- Downloads land in a temp file and are renamed only after a complete transfer.
+- Any failure exits non-zero.
 
 On the **first** command the launcher prompts:
 

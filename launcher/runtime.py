@@ -15,10 +15,12 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from launcher import cli, credentials, interactive, ssh_client
+import paramiko
+
+from launcher import cli, credentials, interactive, sftp_client, ssh_client
 from launcher.cli import Mode
 from shared.config import LauncherConfig
-from shared.errors import FalcoError
+from shared.errors import FalcoError, SSHConnectionError
 
 
 def run(config: LauncherConfig, argv: Sequence[str] | None = None) -> int:
@@ -54,6 +56,23 @@ def run(config: LauncherConfig, argv: Sequence[str] | None = None) -> int:
                 print(f"falco: cannot read {request.stdin_path}: {exc}", file=sys.stderr)
                 return 2
             return ssh_client.run_script(client, script)
+
+        if request.mode is Mode.SFTP:
+            assert request.sftp is not None
+            try:
+                sftp = client.open_sftp()
+            except (paramiko.SSHException, OSError) as exc:
+                raise SSHConnectionError(f"Could not open SFTP session: {exc}") from exc
+            try:
+                sftp_client.execute(
+                    sftp,
+                    request.sftp,
+                    overwrite=request.overwrite,
+                    mkdirs=request.mkdirs,
+                )
+            finally:
+                sftp.close()
+            return 0
 
         assert request.command is not None
         return ssh_client.run_command(client, request.command)

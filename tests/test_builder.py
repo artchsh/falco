@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from editor import builder
-from editor.templates import render_entry_script
+from editor.templates import render_entry_script, render_how_to_use
 from shared.config import LauncherConfig
 
 
@@ -61,6 +61,37 @@ def test_pyinstaller_command_without_icon(tmp_path: Path) -> None:
         paths=[],
     )
     assert "--icon" not in cmd
+
+
+def test_how_to_use_uses_invocation_name_and_target() -> None:
+    cfg = LauncherConfig.create(
+        launcher_name="meks", host="203.0.113.10", username="ubuntu", port=2200
+    )
+    doc = render_how_to_use(cfg, "meks.exe")
+    # The command examples use the name without the .exe suffix.
+    assert "`meks`" in doc
+    assert "meks.exe" not in doc
+    assert "203.0.113.10" in doc
+    assert "ubuntu" in doc
+    assert "2200" in doc
+
+
+def test_how_to_use_makes_credential_and_encryption_claims() -> None:
+    cfg = LauncherConfig.create(launcher_name="meks", host="h", username="u")
+    doc = render_how_to_use(cfg, "meks").lower()
+    # Reassurances the user asked for...
+    assert "no password is stored" in doc
+    assert "credential store" in doc
+    assert "encrypted" in doc
+    # ...and the honest host-key caveat is present, not hidden.
+    assert "man-in-the-middle" in doc or "trust-on-connect" in doc
+
+
+def test_how_to_use_contains_no_secret_value() -> None:
+    cfg = LauncherConfig.create(launcher_name="meks", host="h", username="u")
+    doc = render_how_to_use(cfg, "meks")
+    # It documents credential handling but embeds no actual password.
+    assert "password=" not in doc
 
 
 def test_strip_exe_suffix_variants() -> None:

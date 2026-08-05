@@ -3,7 +3,8 @@
 Tkinter is chosen because it ships with CPython, adds no runtime dependency, and
 is available on Windows, macOS and Linux. The window collects the launcher
 fields, validates them into a :class:`LauncherConfig`, and runs the build on a
-background thread so the UI stays responsive.
+background thread so the UI stays responsive. Build progress is streamed live
+into a log pane at the bottom so the user can see what the builder is doing.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from tkinter.scrolledtext import ScrolledText
 
 from editor.builder import build_launcher
 from shared.config import DEFAULT_SSH_PORT, LauncherConfig
@@ -22,7 +24,7 @@ class FalcoEditor(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Falco Editor")
-        self.minsize(560, 420)
+        self.minsize(620, 560)
         self._icon_path: Path | None = None
         self._build_form()
 
@@ -31,7 +33,9 @@ class FalcoEditor(tk.Tk):
         pad = {"padx": 8, "pady": 6}
         frame = ttk.Frame(self, padding=16)
         frame.grid(sticky="nsew")
+        # Let the frame (and its log row) grow with the window.
         self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
 
         self.var_name = tk.StringVar(value="meks")
@@ -42,14 +46,14 @@ class FalcoEditor(tk.Tk):
         self.var_icon = tk.StringVar(value="")
 
         rows = [
-            ("Launcher name", self.var_name, None),
-            ("SSH host / IP", self.var_host, None),
-            ("SSH port", self.var_port, None),
-            ("SSH username", self.var_user, None),
-            ("Output filename", self.var_output, None),
+            ("Launcher name", self.var_name),
+            ("SSH host / IP", self.var_host),
+            ("SSH port", self.var_port),
+            ("SSH username", self.var_user),
+            ("Output filename", self.var_output),
         ]
         r = 0
-        for label, var, _ in rows:
+        for label, var in rows:
             ttk.Label(frame, text=label).grid(row=r, column=0, sticky="w", **pad)
             ttk.Entry(frame, textvariable=var).grid(row=r, column=1, sticky="ew", **pad)
             r += 1
@@ -75,10 +79,40 @@ class FalcoEditor(tk.Tk):
         self.build_button.grid(row=r, column=0, columnspan=2, sticky="ew", **pad)
         r += 1
 
+        # Progress bar + short status line.
+        self.progress = ttk.Progressbar(frame, mode="indeterminate")
+        self.progress.grid(row=r, column=0, columnspan=2, sticky="ew", **pad)
+        r += 1
+
         self.status = tk.StringVar(value="Ready.")
         ttk.Label(frame, textvariable=self.status, foreground="#333").grid(
             row=r, column=0, columnspan=2, sticky="w", **pad
         )
+        r += 1
+
+        # Live build log — this is the "what is the builder doing now" pane.
+        ttk.Label(frame, text="Build output").grid(row=r, column=0, sticky="w", **pad)
+        r += 1
+        self.log = ScrolledText(frame, height=12, wrap="none", state="disabled",
+                                font=("Consolas", 9))
+        self.log.grid(row=r, column=0, columnspan=2, sticky="nsew", **pad)
+        frame.rowconfigure(r, weight=1)
+
+    # -- Log helpers ------------------------------------------------------ #
+    def _append_log(self, message: str) -> None:
+        """Append a line to the build log and keep the newest visible."""
+
+        self.log.configure(state="normal")
+        self.log.insert("end", message + "\n")
+        self.log.see("end")
+        self.log.configure(state="disabled")
+        # Mirror the latest line into the one-line status for a quick glance.
+        self.status.set(message if len(message) <= 90 else message[:87] + "…")
+
+    def _clear_log(self) -> None:
+        self.log.configure(state="normal")
+        self.log.delete("1.0", "end")
+        self.log.configure(state="disabled")
 
     # -- Actions ---------------------------------------------------------- #
     def _pick_icon(self) -> None:
@@ -115,7 +149,13 @@ class FalcoEditor(tk.Tk):
             return
 
         self.build_button.configure(state="disabled")
-        self.status.set("Building… this can take a minute.")
+        self._clear_log()
+        self.progress.start(12)
+        self._append_log(f"Building '{output_name}' for {config.username}@{config.host}:{config.port}")
+
+        def on_progress(message: str) -> None:
+            # Called from the worker thread; marshal onto the UI thread.
+            self.after(0, lambda m=message: self._append_log(m))
 
         def worker() -> None:
             try:
@@ -124,22 +164,34 @@ class FalcoEditor(tk.Tk):
                     output_name=output_name,
                     icon_path=icon,
                     output_dir=out_dir,
+                    progress=on_progress,
                 )
             except FalcoError as exc:
                 self.after(0, lambda: self._build_done(error=str(exc)))
             else:
-                self.after(0, lambda: self._build_done(path=str(result.executable)))
+                self.after(0, lambda: self._build_done(
+                    path=str(result.executable), guide=str(result.how_to_use)))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _build_done(self, *, path: str | None = None, error: str | None = None) -> None:
+    def _build_done(
+        self, *, path: str | None = None, guide: str | None = None, error: str | None = None
+    ) -> None:
+        self.progress.stop()
         self.build_button.configure(state="normal")
         if error:
-            self.status.set("Build failed.")
+            self._append_log("BUILD FAILED.")
+            self.status.set("Build failed — see output below.")
             messagebox.showerror("Build failed", error)
         else:
+            self._append_log(f"DONE. Executable written to: {path}")
+            if guide:
+                self._append_log(f"Usage guide: {guide}")
             self.status.set(f"Built: {path}")
-            messagebox.showinfo("Build complete", f"Launcher written to:\n{path}")
+            messagebox.showinfo(
+                "Build complete",
+                f"Launcher written to:\n{path}\n\nUsage guide:\n{guide}",
+            )
 
 
 def launch() -> int:

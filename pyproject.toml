@@ -16,7 +16,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-build = ["pyinstaller>=6.3"]
+# Pillow lets PyInstaller accept a .png icon and convert it to .ico/.icns.
+build = ["pyinstaller>=6.3", "pillow>=10.0"]
 dev = [
     "pytest>=8.0",
     "pytest-mock>=3.12",

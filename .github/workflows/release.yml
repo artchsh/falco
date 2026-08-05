@@ -1,0 +1,80 @@
+name: release
+
+# On every push to main, build the Falco Editor for Windows, macOS and Linux
+# and publish them together as a new GitHub Release.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: falco-editor-windows.exe
+            artifact: dist/falco-editor.exe
+          - os: macos-latest
+            asset: falco-editor-macos
+            artifact: dist/falco-editor
+          - os: ubuntu-latest
+            asset: falco-editor-linux
+            artifact: dist/falco-editor
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[build]"
+
+      - name: Build Falco Editor
+        run: python build/build_editor.py --name falco-editor --out-dir dist
+
+      - name: Rename artifact for this OS
+        shell: bash
+        run: cp "${{ matrix.artifact }}" "${{ matrix.asset }}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Falco Editor (build ${{ github.run_number }})
+          body: |
+            Standalone Falco Editor built from ${{ github.sha }}.
+
+            Assets:
+            - `falco-editor-windows.exe` — Windows
+            - `falco-editor-macos` — macOS
+            - `falco-editor-linux` — Linux
+
+            The editor authors and validates launcher configuration. Compiling
+            server launchers requires a Python environment (see the README).
+          files: artifacts/*
+          fail_on_unmatched_files: true
