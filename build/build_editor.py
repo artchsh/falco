@@ -6,11 +6,12 @@ Used by the release workflow to produce one downloadable binary per OS:
 * macOS    -> falco-editor       (single binary; launches the Tk window)
 * Linux    -> falco-editor       (single binary; needs a display + Tk at runtime)
 
-Note: a *frozen* editor cannot itself run PyInstaller to compile server
-launchers (there is no Python toolchain inside the binary). The packaged editor
-is for authoring/validating launcher configuration; compiling launchers is done
-from a Python environment via ``build/build_launcher.py`` or the build
-workflows. The editor surfaces a clear message if PyInstaller is unavailable.
+Note: launchers are no longer compiled per build. The editor ships a prebuilt
+Rust ``falco-stub`` binary (bundled here via ``--add-data``) and produces a
+launcher by copying that stub and appending the non-secret config. This needs no
+toolchain, so a *frozen* editor can produce launchers fully offline. Build the
+stub first with ``cargo build --release`` in ``launcher-rs/`` (CI does this on
+each OS before packaging the editor).
 """
 
 from __future__ import annotations
@@ -47,6 +48,21 @@ def pyinstaller_command(*, name: str, dist_dir: Path, work_dir: Path) -> list[st
         "--hidden-import",
         "shared",
     ]
+
+    # Bundle the prebuilt launcher stub so the editor can produce launchers with
+    # no toolchain. Expected at launcher-rs/target/release/ (built by CI or
+    # `cargo build --release` locally), or downloaded into ./stub/ in CI.
+    sep = ";" if sys.platform == "win32" else ":"
+    stub_name = "falco-stub.exe" if sys.platform == "win32" else "falco-stub"
+    stub_src = _REPO_ROOT / "stub" / stub_name
+    if not stub_src.exists():
+        stub_src = _REPO_ROOT / "launcher-rs" / "target" / "release" / stub_name
+    if not stub_src.exists():
+        raise SystemExit(
+            f"stub binary not found: build launcher-rs first ({stub_src})"
+        )
+    cmd += ["--add-data", f"{stub_src}{sep}stub"]
+
     # Hide the console window behind the GUI on Windows.
     if sys.platform == "win32":
         cmd.append("--windowed")
