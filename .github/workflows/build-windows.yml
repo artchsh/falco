@@ -1,0 +1,59 @@
+name: build-windows
+
+# Windows binaries must be built on Windows, so this runs on windows-latest.
+# Trigger it manually and supply the launcher details; the finished .exe is
+# uploaded as a build artifact. No password is ever passed here — the launcher
+# asks for it on first run and stores it in Windows Credential Manager.
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: "Launcher name (e.g. meks)"
+        required: true
+        default: "meks"
+      host:
+        description: "SSH host or IP"
+        required: true
+      user:
+        description: "SSH username"
+        required: true
+      port:
+        description: "SSH port"
+        required: true
+        default: "22"
+      output:
+        description: "Output filename"
+        required: true
+        default: "meks.exe"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[build]"
+
+      - name: Build launcher
+        run: >
+          python build/build_launcher.py
+          --name "${{ github.event.inputs.name }}"
+          --host "${{ github.event.inputs.host }}"
+          --user "${{ github.event.inputs.user }}"
+          --port "${{ github.event.inputs.port }}"
+          --output "${{ github.event.inputs.output }}"
+          --out-dir dist
+
+      - name: Upload Windows launcher
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.name }}-windows
+          path: dist/*.exe
+          if-no-files-found: error

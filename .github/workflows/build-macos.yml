@@ -1,0 +1,62 @@
+name: build-macos
+
+# macOS binaries must be built on macOS, so this runs on macos-latest.
+# Trigger it manually and supply the launcher details; the finished executable
+# is uploaded as a build artifact. No password is ever passed here — the
+# launcher asks for it on first run and stores it in the macOS Keychain.
+#
+# Note: the produced binary is unsigned. On first launch a user may need to
+# right-click -> Open (or clear the quarantine attribute) to run it.
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: "Launcher name (e.g. meks)"
+        required: true
+        default: "meks"
+      host:
+        description: "SSH host or IP"
+        required: true
+      user:
+        description: "SSH username"
+        required: true
+      port:
+        description: "SSH port"
+        required: true
+        default: "22"
+      output:
+        description: "Output filename"
+        required: true
+        default: "meks"
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[build]"
+
+      - name: Build launcher
+        run: >
+          python build/build_launcher.py
+          --name "${{ github.event.inputs.name }}"
+          --host "${{ github.event.inputs.host }}"
+          --user "${{ github.event.inputs.user }}"
+          --port "${{ github.event.inputs.port }}"
+          --output "${{ github.event.inputs.output }}"
+          --out-dir dist
+
+      - name: Upload macOS launcher
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.name }}-macos
+          path: dist/${{ github.event.inputs.output }}
+          if-no-files-found: error

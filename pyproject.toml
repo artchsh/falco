@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "falco"
+version = "0.1.0"
+description = "Falco: an editor that generates standalone password-based SSH launcher executables."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Falco" }]
+dependencies = [
+    "paramiko>=3.4",
+    "keyring>=24.0",
+]
+
+[project.optional-dependencies]
+build = ["pyinstaller>=6.3"]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.12",
+]
+
+[project.scripts]
+falco-editor = "editor.__main__:main"
+
+[tool.setuptools]
+# Flat layout: the top-level directories are the importable packages.
+packages = ["editor", "launcher", "shared"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
