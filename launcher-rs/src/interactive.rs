@@ -5,10 +5,10 @@
 //! tab-completion, colours and `sudo` prompts work. The terminal is always
 //! restored, even after an error or disconnect.
 //!
-//! RECONCILE(russh/crossterm): `request_pty`/`request_shell`/`window_change`
-//! names and the resize event path may differ by version. The single-size-at-
-//! open behavior below matches the Windows path of the Python launcher; a
-//! resize arm (see the note in bridge) fully matches the POSIX SIGWINCH path.
+//! The PTY is sized once at open (matches the Windows path of the Python
+//! launcher). To fully match the POSIX SIGWINCH path, add a resize arm to the
+//! select loop (see the note in `bridge`). Verified against russh 0.45 /
+//! crossterm 0.28.
 
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, size as term_size};
 use russh::client;

@@ -5,9 +5,8 @@
 //! directories, recursive dir transfer, live progress, and downloads written to
 //! a temp file that is renamed only on success (no truncated file on interrupt).
 //!
-//! RECONCILE(russh-sftp): method names (`metadata`, `create`, `open`,
-//! `read_dir`, `create_dir`, `remove_file`, `rename`) and the read/write handle
-//! traits depend on the resolved crate version. Preserve the behavior above.
+//! Verified against russh-sftp 2.4: `File` implements tokio `AsyncRead`/
+//! `AsyncWrite`; `read_dir` returns a `ReadDir` iterator of `DirEntry`.
 
 use russh_sftp::client::SftpSession;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

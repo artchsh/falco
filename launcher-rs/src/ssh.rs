@@ -5,14 +5,12 @@
 //! `AutoAddPolicy`) and defeats SSH's protection against server impersonation.
 //! Only run launchers against hosts on networks you trust.
 //!
-//! RECONCILE(russh): the russh client API drifts between versions. The most
-//! likely drift points are marked inline. Preserve behavior (auto-accept host
-//! keys, live stdout/stderr streaming, remote exit-code propagation) regardless
-//! of exact method/type names.
+//! Verified against russh 0.45 / russh-sftp 2.4.
 
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use russh::client::{self, Handle};
 use russh::{ChannelMsg, Disconnect};
 use tokio::io::{AsyncWriteExt, BufWriter};
@@ -23,15 +21,14 @@ use crate::errors::{FalcoError, FResult};
 /// Client handler that auto-accepts every host key.
 pub struct Client;
 
+// russh 0.45's Handler is an `#[async_trait]`; the impl must match.
+#[async_trait]
 impl client::Handler for Client {
     type Error = russh::Error;
 
-    // RECONCILE(russh): signature/key type may be
-    // `check_server_key(&mut self, &russh::keys::PublicKey)` or
-    // `&russh_keys::key::PublicKey` depending on version.
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh::keys::PublicKey,
+        _server_public_key: &russh::keys::key::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }
@@ -100,9 +97,7 @@ impl SshSession {
             .request_subsystem(true, "sftp")
             .await
             .map_err(|e| FalcoError::Ssh(format!("Could not start SFTP subsystem: {e}")))?;
-        // RECONCILE(russh-sftp): the adapter from a russh channel to an
-        // SftpSession depends on the resolved crate version — `channel.into_stream()`
-        // is the common form. Use whatever that version documents.
+        // russh 0.45 Channel -> russh-sftp 2.4 SftpSession via into_stream().
         russh_sftp::client::SftpSession::new(channel.into_stream())
             .await
             .map_err(|e| FalcoError::Ssh(format!("Could not open SFTP session: {e}")))
@@ -164,14 +159,13 @@ pub async fn connect(cfg: &LauncherConfig, password: &str) -> FResult<SshSession
             FalcoError::Ssh(format!("Could not connect to {}:{}: {e}", cfg.host, cfg.port))
         })?;
 
-    // RECONCILE(russh): `authenticate_password` returns an auth result exposing
-    // `.success()` in recent versions; older ones return `bool`. Adapt the check.
+    // russh 0.45: authenticate_password returns Result<bool, Error>.
     let authed = handle
         .authenticate_password(&cfg.username, password)
         .await
         .map_err(|e| FalcoError::Ssh(format!("Authentication error: {e}")))?;
 
-    if !authed.success() {
+    if !authed {
         return Err(FalcoError::Ssh(format!(
             "Authentication failed for {}@{}. The stored password may be wrong; \
              re-run with --reset-password.",

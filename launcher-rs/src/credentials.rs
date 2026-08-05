@@ -21,8 +21,6 @@ impl KeyStore for OsKeyStore {
     fn get(&self, service: &str, user: &str) -> FResult<Option<String>> {
         let entry = keyring::Entry::new(service, user)
             .map_err(|e| FalcoError::Credential(format!("keyring init failed: {e}")))?;
-        // RECONCILE(keyring): missing-entry variant is `keyring::Error::NoEntry`
-        // in keyring v3. If the resolved version names it differently, adapt.
         match entry.get_password() {
             Ok(pw) => Ok(Some(pw)),
             Err(keyring::Error::NoEntry) => Ok(None),
@@ -48,8 +46,7 @@ impl KeyStore for OsKeyStore {
             Err(_) => return Ok(()),
         };
         // Deleting a non-existent entry is not an error worth surfacing.
-        // RECONCILE(keyring): method is `delete_credential()` in keyring v3
-        // (was `delete_password()` in v2).
+        // keyring v3 names this `delete_credential()` (v2 was `delete_password()`).
         let _ = entry.delete_credential();
         Ok(())
     }
@@ -83,6 +80,9 @@ pub fn resolve_password(
     }
     let label = format!("SSH password for {}@{}: ", cfg.username, cfg.host);
     let pw = prompt(&label)?;
+    if pw.is_empty() {
+        return Err(FalcoError::Credential("No password entered; aborting.".into()));
+    }
     store.set(&cfg.credential_id, &cfg.username, &pw)?;
     Ok(pw)
 }

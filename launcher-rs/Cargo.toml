@@ -13,7 +13,8 @@ name = "falco_stub"
 path = "src/lib.rs"
 
 [dependencies]
-tokio = { version = "1", features = ["rt", "macros", "io-std", "io-util", "net", "time", "signal"] }
+tokio = { version = "1", features = ["rt", "macros", "io-std", "io-util", "net", "time", "signal", "fs"] }
+async-trait = "0.1"
 russh = "0.45"
 russh-sftp = "2"
 keyring = "3"
