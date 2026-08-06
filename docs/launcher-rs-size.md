@@ -21,3 +21,12 @@ build exceeds 5 MB, tighten the levers: confirm `strip` applied, try
 
 This replaces the ~25 MB PyInstaller launcher documented in
 [launcher-size.md](launcher-size.md).
+
+## Platform notes
+
+- **Linux** links system `libdbus-1` to reach the Secret Service (GNOME Keyring
+  / KWallet), because that keystore is a D-Bus service. Building needs
+  `libdbus-1-dev` + `pkg-config`; running needs a Secret Service provider (present
+  on any desktop that has a login keyring). There is no OpenSSL dependency
+  (`crypto-rust`). Windows (Credential Manager) and macOS (Keychain) use their
+  native OS APIs with no extra system libraries.

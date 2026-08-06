@@ -34,6 +34,11 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # The Linux keyring backend talks to the Secret Service over D-Bus.
+      - name: Install libdbus (Secret Service keyring backend)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+
       - name: Build launcher stub (bundled into the editor)
         run: cargo build --release --manifest-path launcher-rs/Cargo.toml
 
