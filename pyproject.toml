@@ -10,10 +10,9 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Falco" }]
-dependencies = [
-    "paramiko>=3.4",
-    "keyring>=24.0",
-]
+# The editor is a pure-stdlib + Tk GUI. SSH/SFTP/keyring now live in the Rust
+# launcher (launcher-rs/), so the Python side has no third-party runtime deps.
+dependencies = []
 
 [project.optional-dependencies]
 # Pillow lets PyInstaller accept a .png icon and convert it to .ico/.icns.
@@ -28,7 +27,8 @@ falco-editor = "editor.__main__:main"
 
 [tool.setuptools]
 # Flat layout: the top-level directories are the importable packages.
-packages = ["editor", "launcher", "shared"]
+# The launcher is now a Rust crate (launcher-rs/), not a Python package.
+packages = ["editor", "shared"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

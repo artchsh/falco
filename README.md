@@ -18,43 +18,45 @@ to a file by Falco.
 
 ## 1. Architecture summary
 
-Falco is one Python codebase with two runtime "faces":
+Falco is a Python **editor** that configures a prebuilt **Rust launcher**:
 
 ```
-┌────────────────────┐        generates         ┌──────────────────────────┐
+┌────────────────────┐        configures        ┌──────────────────────────┐
 │   Falco Editor      │ ───────────────────────▶ │  Standalone launcher     │
-│  (Tkinter GUI)      │   (PyInstaller onefile)  │  e.g. meks.exe           │
-│                     │                          │                          │
-│  collects config →  │                          │  embeds NON-SECRET config│
-│  runs the builder   │                          │  reads password from     │
-└────────────────────┘                          │  OS keystore at runtime  │
+│  (Tkinter GUI)      │  (copy stub + append     │  e.g. meks.exe (~1-3 MB) │
+│                     │   NON-SECRET config)     │                          │
+│  collects config →  │                          │  reads its own trailer   │
+│  runs the builder   │                          │  for config; password    │
+└────────────────────┘                          │  from OS keystore         │
                                                  └──────────────────────────┘
 ```
 
-Three importable packages, kept deliberately small and separate:
+Components, kept deliberately small and separate:
 
-| Package     | Responsibility                                                        |
-|-------------|-----------------------------------------------------------------------|
-| `shared/`   | The non-secret `LauncherConfig` model + typed error hierarchy.        |
-| `launcher/` | Everything a generated binary runs: CLI parsing, credentials, SSH, interactive shell, runtime dispatch. |
-| `editor/`   | The GUI, the entry-script template, and the PyInstaller build driver. |
+| Package        | Responsibility                                                     |
+|----------------|--------------------------------------------------------------------|
+| `shared/`      | The non-secret `LauncherConfig` model + typed error hierarchy (Python). |
+| `launcher-rs/` | The Rust launcher: CLI parsing, credentials, SSH/SFTP, PTY, dispatch. Built once per OS into a config-less `falco-stub`. |
+| `editor/`      | The Tkinter GUI and the stub-configuring build driver.             |
 
-**How config is "embedded":** the Editor does *not* copy the runtime into the
-binary by hand. It writes a two-line entry script (`editor/templates.py`) that
-constructs a `LauncherConfig` and calls `launcher.run(config)`. PyInstaller
-freezes that script together with the `launcher` and `shared` packages. Only
-`host`, `port`, `username` and `credential_id` are embedded — there is no
-password field anywhere in the model, so a secret physically cannot be baked in.
+**How config is "embedded":** the Editor does *not* compile anything. It copies
+the prebuilt `falco-stub` and appends the config as a trailer
+(`json + u64 LE length + b"FALCOCFG"`, see `editor/builder.py`); at startup the
+launcher reads its own file to recover it. Only `host`, `port`, `username` and
+`credential_id` are embedded — there is no password field anywhere in the model,
+so a secret physically cannot be baked in. Because there is no compile step,
+even a *frozen* editor can produce launchers fully offline.
 
-**Data flow at runtime:**
+**Data flow at runtime (Rust launcher):**
 
-1. `launcher/cli.py` parses argv into a `LaunchRequest` (command / stdin / interactive).
-2. `launcher/credentials.py` resolves the password from the OS keystore (via
-   `keyring`), prompting once (no echo) and saving it if absent.
-3. `launcher/ssh_client.py` connects with Paramiko (password auth,
-   auto-accepting host keys) and streams output, returning the remote exit code.
-4. `launcher/interactive.py` handles the no-args PTY shell.
-5. `launcher/runtime.py` wires it together and returns the exit code.
+1. `config.rs` reads the appended trailer from the executable's own file.
+2. `cli.rs` parses argv into a `LaunchRequest` (command / stdin / interactive / SFTP).
+3. `credentials.rs` resolves the password from the OS keystore (via the `keyring`
+   crate), prompting once (no echo) and saving it if absent.
+4. `ssh.rs` connects with `russh` (password auth, auto-accepting host keys) and
+   streams output, returning the remote exit code.
+5. `interactive.rs` handles the no-args PTY shell; `sftp.rs` handles file transfer.
+6. `main.rs` wires it together and maps errors to the exit-code contract.
 
 ## 2. Implementation plan (and status)
 
@@ -68,7 +70,7 @@ packaging first. That MVP is **done and verified on Windows**:
 - [x] One-shot command execution, live stdout/stderr streaming, exit-code propagation
 - [x] Safe command parsing for both `"docker ps"` and `docker ps` forms
 - [x] `--stdin deploy.sh` remote-script mode
-- [x] Tkinter Editor GUI + PyInstaller `--onefile` build driver
+- [x] Tkinter Editor GUI + stub-configuring build driver (Rust launcher via `launcher-rs/`)
 - [x] Automated tests (config, credentials, CLI parsing, exit-code propagation, build)
 - [x] GitHub Actions for Windows / macOS / Linux builds + a test matrix
 - [x] Interactive PTY shell — full on POSIX (raw mode, resize, restore), threaded fallback on Windows

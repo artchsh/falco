@@ -1,0 +1,43 @@
+[package]
+name = "falco-stub"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+
+[[bin]]
+name = "falco-stub"
+path = "src/main.rs"
+
+[lib]
+name = "falco_stub"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "macros", "io-std", "io-util", "net", "time", "signal", "fs"] }
+async-trait = "0.1"
+russh = "0.45"
+russh-sftp = "2"
+rpassword = "7"
+crossterm = "0.28"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+# keyring needs a per-OS backend feature enabled, or it silently uses a
+# non-persistent in-memory mock store. Pick the native store per platform;
+# Linux uses the pure-Rust Secret Service client (no OpenSSL) to stay small.
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

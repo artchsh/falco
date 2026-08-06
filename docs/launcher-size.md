@@ -1,5 +1,10 @@
 # Reducing the launcher binary size
 
+> **Superseded.** The launcher was rewritten in Rust (Option B below), so it is
+> no longer a ~25 MB Python binary. See [launcher-rs-size.md](launcher-rs-size.md)
+> for the current sizes and [`launcher-rs/`](../launcher-rs) for the crate. This
+> note is kept for the historical analysis that motivated the rewrite.
+
 The generated launcher is ~25 MB. This note records why, and the options for
 shrinking it. **Nothing here is implemented yet** — it's a plan for later.
 

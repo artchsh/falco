@@ -32,6 +32,11 @@ jobs:
         with:
           python-version: "3.12"
 
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build launcher stub (bundled into the editor)
+        run: cargo build --release --manifest-path launcher-rs/Cargo.toml
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -74,7 +79,8 @@ jobs:
             - `falco-editor-macos` — macOS
             - `falco-editor-linux` — Linux
 
-            The editor authors and validates launcher configuration. Compiling
-            server launchers requires a Python environment (see the README).
+            The editor authors, validates, and produces launcher executables by
+            configuring a bundled prebuilt Rust stub — no toolchain required, so
+            it works fully offline (see the README).
           files: artifacts/*
           fail_on_unmatched_files: true
