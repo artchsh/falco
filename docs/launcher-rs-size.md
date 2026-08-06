@@ -6,14 +6,14 @@ OpenSSL is linked).
 
 | OS            | Size | Source |
 |---------------|------|--------|
-| Windows (x86_64)| **1.14 MB** (1,199,104 bytes) | measured, rustc 1.97.1 |
-| Linux (x86_64)  | _pending CI_ | tests.yml `rust` job |
-| macOS (arm64)   | _pending CI_ | tests.yml `rust` job |
+| macOS         | **1.02 MB** (1,074,848 bytes) | CI, `rust` job |
+| Windows (x86_64)| **1.14 MB** (1,200,128 bytes) | CI, `rust` job |
+| Linux (x86_64)  | **1.78 MB** (1,864,288 bytes) | CI, `rust` job |
 
-Windows comes in at **1.14 MB** — a ~22× reduction from the ~25 MB PyInstaller
-launcher, and at the low end of the 1–3 MB target. Linux/macOS are expected in
-the same ballpark (russh is pure Rust; no per-OS native libs). Fill those rows
-from the `rust` job's "Report stub size" step.
+All three are comfortably under the 5 MB gate and at/near the 1–3 MB target — a
+~14–24× reduction from the ~25 MB PyInstaller launcher. Linux is the largest
+because it bundles the Secret Service client stack (dbus-secret-service +
+crypto-rust); macOS/Windows use their native OS keystore APIs.
 
 **Budget:** ≤ 5 MB (target 1–3 MB) — comfortably met on Windows. If a future
 build exceeds 5 MB, tighten the levers: confirm `strip` applied, try
