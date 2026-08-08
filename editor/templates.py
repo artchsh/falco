@@ -25,6 +25,28 @@ command line is needed. This document is written for AI agents and automation.
 | Port  | `{port}` |
 | User  | `{username}` |
 
+## First run on macOS / Linux
+
+On **Windows** run the `.exe` directly — no setup. On **macOS and Linux** the
+launcher may need to be marked executable once before first use, especially if it
+was built on a different OS: a Windows-built editor cannot set the Unix
+executable bit, so the `{name}-macos` / `{name}-linux` files arrive without it.
+
+```
+chmod +x {name}-linux      # Linux  (use the exact file name you received)
+chmod +x {name}-macos      # macOS
+```
+
+On **macOS**, an unsigned binary copied from another machine is also quarantined
+by Gatekeeper. Either right-click → **Open** once, or clear the attribute:
+
+```
+xattr -d com.apple.quarantine {name}-macos
+```
+
+(Launchers built on their own OS — e.g. the macOS launcher from a macOS editor —
+are already marked executable; this step is only needed for cross-built files.)
+
 ## Running commands
 
 ```

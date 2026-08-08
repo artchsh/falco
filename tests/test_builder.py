@@ -68,6 +68,15 @@ def test_how_to_use_makes_credential_and_encryption_claims() -> None:
     assert "man-in-the-middle" in doc or "trust-on-connect" in doc
 
 
+def test_how_to_use_notes_chmod_for_unix_launchers() -> None:
+    cfg = LauncherConfig.create(launcher_name="meks", host="h", username="u")
+    doc = render_how_to_use(cfg, "meks.exe")
+    assert "chmod +x meks-linux" in doc
+    assert "chmod +x meks-macos" in doc
+    # macOS Gatekeeper quarantine guidance is present too.
+    assert "com.apple.quarantine" in doc
+
+
 def test_how_to_use_contains_no_secret_value() -> None:
     cfg = LauncherConfig.create(launcher_name="meks", host="h", username="u")
     doc = render_how_to_use(cfg, "meks")
