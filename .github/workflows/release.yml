@@ -1,7 +1,9 @@
 name: release
 
 # On every push to main, build the Falco Editor for Windows, macOS and Linux
-# and publish them together as a new GitHub Release.
+# and publish them together as a new GitHub Release. Each editor bundles all
+# three per-OS launcher stubs, so any one of them can emit Windows/macOS/Linux
+# launchers from a single run.
 on:
   push:
     branches: [main]
@@ -10,7 +12,48 @@ permissions:
   contents: write
 
 jobs:
+  # Build the launcher stub natively on each OS and publish it as a canonically
+  # named artifact so the editor jobs can bundle all three.
+  build-stubs:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            stub: launcher-rs/target/release/falco-stub.exe
+            artifact: falco-stub-windows.exe
+          - os: macos-latest
+            stub: launcher-rs/target/release/falco-stub
+            artifact: falco-stub-macos
+          - os: ubuntu-latest
+            stub: launcher-rs/target/release/falco-stub
+            artifact: falco-stub-linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      # The Linux keyring backend talks to the Secret Service over D-Bus.
+      - name: Install libdbus (Secret Service keyring backend)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Build launcher stub
+        run: cargo build --release --manifest-path launcher-rs/Cargo.toml
+
+      - name: Stage stub under its canonical name
+        shell: bash
+        run: cp "${{ matrix.stub }}" "${{ matrix.artifact }}"
+
+      - name: Upload stub artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+
   build:
+    needs: build-stubs
     strategy:
       fail-fast: false
       matrix:
@@ -32,15 +75,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      # The Linux keyring backend talks to the Secret Service over D-Bus.
-      - name: Install libdbus (Secret Service keyring backend)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
-
-      - name: Build launcher stub (bundled into the editor)
-        run: cargo build --release --manifest-path launcher-rs/Cargo.toml
+      # Bundle every platform's stub so this editor can build all three.
+      - name: Download all launcher stubs
+        uses: actions/download-artifact@v4
+        with:
+          path: stubs
+          pattern: falco-stub-*
+          merge-multiple: true
 
       - name: Install dependencies
         run: |
@@ -65,10 +106,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download all build artifacts
+      - name: Download editor build artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: falco-editor-*
           merge-multiple: true
 
       - name: Publish GitHub Release
@@ -84,8 +126,8 @@ jobs:
             - `falco-editor-macos` — macOS
             - `falco-editor-linux` — Linux
 
-            The editor authors, validates, and produces launcher executables by
-            configuring a bundled prebuilt Rust stub — no toolchain required, so
-            it works fully offline (see the README).
+            Each editor bundles prebuilt Rust launcher stubs for all three
+            platforms, so a single editor can emit Windows/macOS/Linux launchers
+            with no toolchain — fully offline (see the README).
           files: artifacts/*
           fail_on_unmatched_files: true

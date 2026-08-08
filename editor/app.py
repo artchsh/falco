@@ -15,7 +15,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
-from editor.builder import build_launcher
+from editor.builder import build_all_launchers, build_launcher
 from shared.config import DEFAULT_SSH_PORT, LauncherConfig
 from shared.errors import FalcoError
 
@@ -44,6 +44,7 @@ class FalcoEditor(tk.Tk):
         self.var_user = tk.StringVar()
         self.var_output = tk.StringVar(value="meks.exe")
         self.var_icon = tk.StringVar(value="")
+        self.var_all_platforms = tk.BooleanVar(value=False)
 
         rows = [
             ("Launcher name", self.var_name),
@@ -64,6 +65,13 @@ class FalcoEditor(tk.Tk):
         icon_row.columnconfigure(0, weight=1)
         ttk.Entry(icon_row, textvariable=self.var_icon).grid(row=0, column=0, sticky="ew")
         ttk.Button(icon_row, text="Browse…", command=self._pick_icon).grid(row=0, column=1, padx=(6, 0))
+        r += 1
+
+        ttk.Checkbutton(
+            frame,
+            text="Build for all platforms (Windows .exe, macOS, Linux)",
+            variable=self.var_all_platforms,
+        ).grid(row=r, column=0, columnspan=2, sticky="w", **pad)
         r += 1
 
         ttk.Label(
@@ -144,6 +152,7 @@ class FalcoEditor(tk.Tk):
 
         output_name = self.var_output.get().strip() or f"{config.launcher_name}.exe"
         icon = self.var_icon.get().strip() or None
+        all_platforms = self.var_all_platforms.get()
         out_dir = filedialog.askdirectory(title="Choose output folder")
         if not out_dir:
             return
@@ -151,7 +160,10 @@ class FalcoEditor(tk.Tk):
         self.build_button.configure(state="disabled")
         self._clear_log()
         self.progress.start(12)
-        self._append_log(f"Building '{output_name}' for {config.username}@{config.host}:{config.port}")
+        target = "all platforms" if all_platforms else output_name
+        self._append_log(
+            f"Building '{target}' for {config.username}@{config.host}:{config.port}"
+        )
 
         def on_progress(message: str) -> None:
             # Called from the worker thread; marshal onto the UI thread.
@@ -159,18 +171,32 @@ class FalcoEditor(tk.Tk):
 
         def worker() -> None:
             try:
-                result = build_launcher(
-                    config,
-                    output_name=output_name,
-                    icon_path=icon,
-                    output_dir=out_dir,
-                    progress=on_progress,
-                )
+                if all_platforms:
+                    multi = build_all_launchers(
+                        config,
+                        base_name=output_name,
+                        output_dir=out_dir,
+                        progress=on_progress,
+                    )
+                    paths = "\n".join(str(p) for p in multi.executables)
+                    if multi.skipped:
+                        on_progress(
+                            "Note: no bundled stub for: " + ", ".join(multi.skipped)
+                        )
+                    self.after(0, lambda: self._build_done(
+                        path=paths, guide=str(multi.how_to_use)))
+                else:
+                    result = build_launcher(
+                        config,
+                        output_name=output_name,
+                        icon_path=icon,
+                        output_dir=out_dir,
+                        progress=on_progress,
+                    )
+                    self.after(0, lambda: self._build_done(
+                        path=str(result.executable), guide=str(result.how_to_use)))
             except FalcoError as exc:
                 self.after(0, lambda: self._build_done(error=str(exc)))
-            else:
-                self.after(0, lambda: self._build_done(
-                    path=str(result.executable), guide=str(result.how_to_use)))
 
         threading.Thread(target=worker, daemon=True).start()
 

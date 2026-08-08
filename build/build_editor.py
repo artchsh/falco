@@ -6,26 +6,92 @@ Used by the release workflow to produce one downloadable binary per OS:
 * macOS    -> falco-editor       (single binary; launches the Tk window)
 * Linux    -> falco-editor       (single binary; needs a display + Tk at runtime)
 
-Note: launchers are no longer compiled per build. The editor ships a prebuilt
-Rust ``falco-stub`` binary (bundled here via ``--add-data``) and produces a
-launcher by copying that stub and appending the non-secret config. This needs no
-toolchain, so a *frozen* editor can produce launchers fully offline. Build the
-stub first with ``cargo build --release`` in ``launcher-rs/`` (CI does this on
-each OS before packaging the editor).
+Note: launchers are no longer compiled per build. The editor ships prebuilt Rust
+``falco-stub`` binaries (bundled here via ``--add-data`` under ``stubs/``) and
+produces a launcher by copying a stub and appending the non-secret config. This
+needs no toolchain, so a *frozen* editor can produce launchers fully offline —
+and, when all three per-OS stubs are bundled, can emit Windows/macOS/Linux
+launchers from a single run.
+
+Stub sources, in priority order:
+
+1. ``<repo>/stubs/falco-stub-{windows.exe,macos,linux}`` — CI downloads the
+   per-OS stub artifacts here so every editor bundles all three platforms.
+2. ``launcher-rs/target/release/falco-stub[.exe]`` — a local ``cargo build
+   --release`` provides the current OS's stub for dev builds.
 """
 
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# Canonical per-OS stub file names bundled under ``stubs/``.
+_CANONICAL = {
+    "windows": "falco-stub-windows.exe",
+    "macos": "falco-stub-macos",
+    "linux": "falco-stub-linux",
+}
 
-def pyinstaller_command(*, name: str, dist_dir: Path, work_dir: Path) -> list[str]:
+
+def _current_os_key() -> str:
+    if sys.platform == "win32":
+        return "windows"
+    if sys.platform == "darwin":
+        return "macos"
+    return "linux"
+
+
+def stage_stubs(staging_root: Path) -> Path:
+    """Assemble a ``stubs/`` dir with every available per-OS stub; return it.
+
+    Always includes the current OS's stub (from CI artifacts or a local cargo
+    build); includes other platforms when CI has provided their artifacts.
+    """
+
+    staging = staging_root / "stubs"
+    staging.mkdir(parents=True, exist_ok=True)
+    collected: list[str] = []
+
+    # 1. CI-provided stubs (one artifact per OS, canonical names) in <repo>/stubs.
+    provided = _REPO_ROOT / "stubs"
+    if provided.exists():
+        for name in _CANONICAL.values():
+            src = provided / name
+            if src.exists() and src.resolve() != (staging / name).resolve():
+                shutil.copy2(src, staging / name)
+                collected.append(name)
+
+    # 2. Ensure the current OS's stub is present (from a local cargo build).
+    cur = _current_os_key()
+    cur_name = _CANONICAL[cur]
+    if cur_name not in collected:
+        dev_name = "falco-stub.exe" if cur == "windows" else "falco-stub"
+        dev = _REPO_ROOT / "launcher-rs" / "target" / "release" / dev_name
+        if dev.exists():
+            shutil.copy2(dev, staging / cur_name)
+            collected.append(cur_name)
+
+    if not collected:
+        raise SystemExit(
+            "no launcher stubs found to bundle. Build one with "
+            "`cd launcher-rs && cargo build --release`, or provide per-OS stubs "
+            f"under {provided}."
+        )
+    print(f"Bundling stubs: {', '.join(sorted(collected))}", flush=True)
+    return staging
+
+
+def pyinstaller_command(
+    *, name: str, dist_dir: Path, work_dir: Path, stubs_dir: Path
+) -> list[str]:
     entry = _REPO_ROOT / "editor" / "__main__.py"
+    sep = ";" if sys.platform == "win32" else ":"
     cmd = [
         sys.executable,
         "-m",
@@ -47,21 +113,10 @@ def pyinstaller_command(*, name: str, dist_dir: Path, work_dir: Path) -> list[st
         "editor",
         "--hidden-import",
         "shared",
+        # Bundle every available per-OS launcher stub under ``stubs/``.
+        "--add-data",
+        f"{stubs_dir}{sep}stubs",
     ]
-
-    # Bundle the prebuilt launcher stub so the editor can produce launchers with
-    # no toolchain. Expected at launcher-rs/target/release/ (built by CI or
-    # `cargo build --release` locally), or downloaded into ./stub/ in CI.
-    sep = ";" if sys.platform == "win32" else ":"
-    stub_name = "falco-stub.exe" if sys.platform == "win32" else "falco-stub"
-    stub_src = _REPO_ROOT / "stub" / stub_name
-    if not stub_src.exists():
-        stub_src = _REPO_ROOT / "launcher-rs" / "target" / "release" / stub_name
-    if not stub_src.exists():
-        raise SystemExit(
-            f"stub binary not found: build launcher-rs first ({stub_src})"
-        )
-    cmd += ["--add-data", f"{stub_src}{sep}stub"]
 
     # Hide the console window behind the GUI on Windows.
     if sys.platform == "win32":
@@ -81,7 +136,11 @@ def main(argv: list[str] | None = None) -> int:
     dist_dir.mkdir(parents=True, exist_ok=True)
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    cmd = pyinstaller_command(name=args.name, dist_dir=dist_dir, work_dir=work_dir)
+    stubs_dir = stage_stubs(work_dir)
+
+    cmd = pyinstaller_command(
+        name=args.name, dist_dir=dist_dir, work_dir=work_dir, stubs_dir=stubs_dir
+    )
     print("$", " ".join(cmd), flush=True)
     proc = subprocess.run(cmd, cwd=_REPO_ROOT)
     if proc.returncode != 0:
