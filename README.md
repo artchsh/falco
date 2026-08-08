@@ -47,6 +47,12 @@ launcher reads its own file to recover it. Only `host`, `port`, `username` and
 so a secret physically cannot be baked in. Because there is no compile step,
 even a *frozen* editor can produce launchers fully offline.
 
+**Cross-platform output:** appending a config is OS-agnostic, so a single editor
+bundles all three per-OS stubs and can emit Windows (`meks-windows.exe`), macOS
+(`meks-macos`) and Linux (`meks-linux`) launchers in one run — tick "Build for
+all platforms" in the GUI. (PyInstaller could only ever emit a binary for the OS
+it ran on; the stub model removes that limit.)
+
 **Data flow at runtime (Rust launcher):**
 
 1. `config.rs` reads the appended trailer from the executable's own file.

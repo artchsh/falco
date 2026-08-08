@@ -78,3 +78,59 @@ def test_strip_exe_suffix_variants() -> None:
     assert builder._strip_exe_suffix("meks.exe") == "meks"
     assert builder._strip_exe_suffix("meks.app") == "meks"
     assert builder._strip_exe_suffix("meks") == "meks"
+
+
+def _fake_stubs(tmp_path):
+    """Create fake per-OS stub files and return {key: path}."""
+    stubs_dir = tmp_path / "stubs"
+    stubs_dir.mkdir()
+    fake = {}
+    for target in builder.TARGETS:
+        p = stubs_dir / target.bundled_name
+        p.write_bytes(b"STUB-" + target.key.encode())
+        fake[target.key] = p
+    return fake
+
+
+def test_build_all_launchers_emits_one_per_platform(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(builder, "discover_stubs", lambda: _fake_stubs(tmp_path))
+    cfg = LauncherConfig.create(launcher_name="meks", host="h", username="u")
+
+    res = builder.build_all_launchers(
+        cfg, base_name="meks.exe", output_dir=tmp_path / "out"
+    )
+
+    names = sorted(p.name for p in res.executables)
+    assert names == ["meks-linux", "meks-macos", "meks-windows.exe"]
+    # Every produced launcher is stub bytes + the config trailer.
+    for p in res.executables:
+        blob = p.read_bytes()
+        assert blob.startswith(b"STUB-")
+        assert blob.endswith(builder.MAGIC)
+    assert res.skipped == []
+    assert res.how_to_use.exists()
+
+
+def test_build_all_launchers_reports_skipped_platforms(tmp_path, monkeypatch) -> None:
+    all_stubs = _fake_stubs(tmp_path)
+    # Only Linux available in this editor.
+    monkeypatch.setattr(builder, "discover_stubs", lambda: {"linux": all_stubs["linux"]})
+    cfg = LauncherConfig.create(launcher_name="meks", host="h", username="u")
+
+    res = builder.build_all_launchers(
+        cfg, base_name="meks", output_dir=tmp_path / "out"
+    )
+
+    assert [p.name for p in res.executables] == ["meks-linux"]
+    assert sorted(res.skipped) == ["macos", "windows"]
+
+
+def test_build_all_launchers_errors_when_no_stubs(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(builder, "discover_stubs", lambda: {})
+    cfg = LauncherConfig.create(launcher_name="meks", host="h", username="u")
+    try:
+        builder.build_all_launchers(cfg, base_name="meks", output_dir=tmp_path / "out")
+    except Exception as exc:  # FalcoError
+        assert "No launcher stubs" in str(exc)
+    else:
+        raise AssertionError("expected FalcoError when no stubs are available")
