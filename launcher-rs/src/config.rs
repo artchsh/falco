@@ -86,15 +86,15 @@ mod tests {
 
     #[test]
     fn credential_id_matches_python_format() {
-        let id = default_credential_id("meks", "root", "1.2.3.4", 22);
-        assert_eq!(id, "falco:meks:root@1.2.3.4:22");
+        let id = default_credential_id("server-client-X", "root", "1.2.3.4", 22);
+        assert_eq!(id, "falco:server-client-X:root@1.2.3.4:22");
     }
 
     #[test]
     fn from_json_parses_all_fields() {
-        let json = r#"{"launcher_name":"meks","host":"h","username":"u","port":2222,"credential_id":"cid","schema_version":1}"#;
+        let json = r#"{"launcher_name":"server-client-X","host":"h","username":"u","port":2222,"credential_id":"cid","schema_version":1}"#;
         let cfg = LauncherConfig::from_json(json).unwrap();
-        assert_eq!(cfg.launcher_name, "meks");
+        assert_eq!(cfg.launcher_name, "server-client-X");
         assert_eq!(cfg.port, 2222);
         assert_eq!(cfg.credential_id, "cid");
     }

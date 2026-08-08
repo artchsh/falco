@@ -38,11 +38,11 @@ class FalcoEditor(tk.Tk):
         self.rowconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
 
-        self.var_name = tk.StringVar(value="meks")
+        self.var_name = tk.StringVar(value="server-client-X")
         self.var_host = tk.StringVar()
         self.var_port = tk.StringVar(value=str(DEFAULT_SSH_PORT))
         self.var_user = tk.StringVar()
-        self.var_output = tk.StringVar(value="meks.exe")
+        self.var_output = tk.StringVar(value="server-client-X.exe")
         self.var_icon = tk.StringVar(value="")
         self.var_all_platforms = tk.BooleanVar(value=False)
 

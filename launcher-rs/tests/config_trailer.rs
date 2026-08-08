@@ -2,11 +2,11 @@ use falco_stub::config::{append_config, read_config_from_bytes, LauncherConfig};
 
 fn sample() -> LauncherConfig {
     LauncherConfig {
-        launcher_name: "meks".into(),
+        launcher_name: "server-client-X".into(),
         host: "1.2.3.4".into(),
         username: "root".into(),
         port: 22,
-        credential_id: "falco:meks:root@1.2.3.4:22".into(),
+        credential_id: "falco:server-client-X:root@1.2.3.4:22".into(),
         schema_version: 1,
     }
 }

@@ -151,8 +151,10 @@ pub async fn connect(cfg: &LauncherConfig, password: &str) -> FResult<SshSession
         .await
         .map_err(|_| {
             FalcoError::Ssh(format!(
-                "Could not connect to {}:{}: timed out",
-                cfg.host, cfg.port
+                "Could not connect to {0}:{1}: timed out. The server may be \
+                 unreachable, or your account may not be set up there yet — make \
+                 sure you can log in as {2}@{0} with a normal SSH client first.",
+                cfg.host, cfg.port, cfg.username
             ))
         })?
         .map_err(|e| {

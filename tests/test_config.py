@@ -9,14 +9,14 @@ from shared.errors import ConfigError
 
 
 def test_create_fills_default_port_and_credential_id() -> None:
-    cfg = LauncherConfig.create(launcher_name="meks", host="host", username="deploy")
+    cfg = LauncherConfig.create(launcher_name="server-client-X", host="host", username="deploy")
     assert cfg.port == DEFAULT_SSH_PORT
-    assert cfg.credential_id == default_credential_id("meks", "deploy", "host", 22)
+    assert cfg.credential_id == default_credential_id("server-client-X", "deploy", "host", 22)
 
 
 def test_create_trims_whitespace() -> None:
-    cfg = LauncherConfig.create(launcher_name="  meks ", host=" host ", username=" deploy ")
-    assert (cfg.launcher_name, cfg.host, cfg.username) == ("meks", "host", "deploy")
+    cfg = LauncherConfig.create(launcher_name="  server-client-X ", host=" host ", username=" deploy ")
+    assert (cfg.launcher_name, cfg.host, cfg.username) == ("server-client-X", "host", "deploy")
 
 
 @pytest.mark.parametrize(
@@ -44,13 +44,13 @@ def test_create_rejects_boolean_port() -> None:
 
 
 def test_roundtrip_json_preserves_fields() -> None:
-    cfg = LauncherConfig.create(launcher_name="meks", host="h", username="u", port=2200)
+    cfg = LauncherConfig.create(launcher_name="server-client-X", host="h", username="u", port=2200)
     restored = LauncherConfig.from_json(cfg.to_json())
     assert restored == cfg
 
 
 def test_serialised_config_never_contains_a_password() -> None:
-    cfg = LauncherConfig.create(launcher_name="meks", host="h", username="u")
+    cfg = LauncherConfig.create(launcher_name="server-client-X", host="h", username="u")
     text = cfg.to_json().lower()
     assert "password" not in text
     assert set(cfg.to_dict()) == {
@@ -74,6 +74,6 @@ def test_from_json_rejects_invalid_json() -> None:
 
 
 def test_config_is_immutable() -> None:
-    cfg = LauncherConfig.create(launcher_name="meks", host="h", username="u")
+    cfg = LauncherConfig.create(launcher_name="server-client-X", host="h", username="u")
     with pytest.raises(Exception):
         cfg.host = "evil"  # type: ignore[misc]

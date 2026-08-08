@@ -119,7 +119,7 @@ mod tests {
 
     fn cfg() -> LauncherConfig {
         LauncherConfig {
-            launcher_name: "meks".into(),
+            launcher_name: "server-client-X".into(),
             host: "h".into(),
             username: "u".into(),
             port: 22,

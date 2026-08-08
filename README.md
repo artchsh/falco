@@ -1,289 +1,92 @@
 # Falco
 
-Falco generates **standalone, single-file SSH launcher executables**. You
-configure a launcher once in a small GUI (the *Falco Editor*), and it produces a
-self-contained binary such as `meks.exe`. Running that binary opens or scripts an
-SSH session to a preconfigured server — **without ever embedding the password**.
+**Turn one SSH server into a tiny double-click app.**
+
+Falco lets you package access to a single server into a small standalone program
+(1–2 MB). You run that program instead of typing `ssh user@host` every time — no
+SSH config, no key files, and the password is never stored in the file.
+
+## What you get
+
+Falco has two parts:
+
+1. **The Editor** — a small desktop app. You type in a server's host, port, and
+   username, click **Build**, and it spits out a launcher program.
+2. **The Launcher** — the little program the Editor creates. It talks to *one*
+   preconfigured server and nothing else.
+
+The first time you run a launcher it asks for the server password once, then
+saves it in your operating system's secure store (Windows Credential Manager,
+macOS Keychain, or Linux Secret Service). After that, it just works.
+
+## What a launcher can do
+
+Say you built one called `server-client-X`:
 
 ```bash
-meks.exe "cd /var/www && git pull && docker compose up -d"
+server-client-X "docker ps"          # run a command on the server
+server-client-X deploy.sh --stdin    # run a local script on the server
+server-client-X                      # open an interactive shell
+
+# copy files over the same connection:
+server-client-X --upload ./app.zip /srv/app.zip
+server-client-X --download /var/log/app.log ./app.log
+server-client-X --upload-dir ./dist /var/www      # whole folders, too
 ```
 
-The password is entered once, on first run, and stored in the OS credential
-store (Windows Credential Manager / macOS Keychain). It is never baked into the
-binary, passed on a command line, placed in an environment variable, or written
-to a file by Falco.
+Commands run **only on the server**, output streams back live, and the program
+exits with the command's real exit code — so it drops straight into scripts and
+CI.
 
----
+## Why it's safe to hand around
 
-## 1. Architecture summary
+- **The password is never inside the launcher.** The file only contains the
+  host, port, and username. The password lives in your OS's secure store and is
+  never written to disk by Falco, put on a command line, or shown in logs.
+- Share the launcher with a teammate and it's useless without the password —
+  which each person enters once on their own machine.
 
-Falco is a Python **editor** that configures a prebuilt **Rust launcher**:
+One honest trade-off: for zero-setup convenience, a launcher **trusts whatever
+server answers** at that host (it doesn't verify the server's identity). Only
+point launchers at servers on networks you trust.
 
-```
-┌────────────────────┐        configures        ┌──────────────────────────┐
-│   Falco Editor      │ ───────────────────────▶ │  Standalone launcher     │
-│  (Tkinter GUI)      │  (copy stub + append     │  e.g. meks.exe (~1-3 MB) │
-│                     │   NON-SECRET config)     │                          │
-│  collects config →  │                          │  reads its own trailer   │
-│  runs the builder   │                          │  for config; password    │
-└────────────────────┘                          │  from OS keystore         │
-                                                 └──────────────────────────┘
-```
+## Build for every OS at once
 
-Components, kept deliberately small and separate:
+Because building a launcher just means "stamp the config into a prebuilt
+program", a single Editor can produce **Windows, macOS, and Linux** launchers in
+one click — tick *"Build for all platforms"*. (On macOS/Linux you may need to
+`chmod +x` the file once; the generated `how-to-use.md` explains it.)
 
-| Package        | Responsibility                                                     |
-|----------------|--------------------------------------------------------------------|
-| `shared/`      | The non-secret `LauncherConfig` model + typed error hierarchy (Python). |
-| `launcher-rs/` | The Rust launcher: CLI parsing, credentials, SSH/SFTP, PTY, dispatch. Built once per OS into a config-less `falco-stub`. |
-| `editor/`      | The Tkinter GUI and the stub-configuring build driver.             |
+## Getting it
 
-**How config is "embedded":** the Editor does *not* compile anything. It copies
-the prebuilt `falco-stub` and appends the config as a trailer
-(`json + u64 LE length + b"FALCOCFG"`, see `editor/builder.py`); at startup the
-launcher reads its own file to recover it. Only `host`, `port`, `username` and
-`credential_id` are embedded — there is no password field anywhere in the model,
-so a secret physically cannot be baked in. Because there is no compile step,
-even a *frozen* editor can produce launchers fully offline.
-
-**Cross-platform output:** appending a config is OS-agnostic, so a single editor
-bundles all three per-OS stubs and can emit Windows (`meks-windows.exe`), macOS
-(`meks-macos`) and Linux (`meks-linux`) launchers in one run — tick "Build for
-all platforms" in the GUI. (PyInstaller could only ever emit a binary for the OS
-it ran on; the stub model removes that limit.)
-
-**Data flow at runtime (Rust launcher):**
-
-1. `config.rs` reads the appended trailer from the executable's own file.
-2. `cli.rs` parses argv into a `LaunchRequest` (command / stdin / interactive / SFTP).
-3. `credentials.rs` resolves the password from the OS keystore (via the `keyring`
-   crate), prompting once (no echo) and saving it if absent.
-4. `ssh.rs` connects with `russh` (password auth, auto-accepting host keys) and
-   streams output, returning the remote exit code.
-5. `interactive.rs` handles the no-args PTY shell; `sftp.rs` handles file transfer.
-6. `main.rs` wires it together and maps errors to the exit-code contract.
-
-## 2. Implementation plan (and status)
-
-The spec asked to prioritise one-shot execution, password storage and Windows
-packaging first. That MVP is **done and verified on Windows**:
-
-- [x] Non-secret typed config model with JSON round-trip
-- [x] Credential storage/lookup via `keyring` (Windows Credential Manager / macOS Keychain)
-- [x] First-run no-echo password prompt + save
-- [x] Password-based SSH connect with auto host-key acceptance
-- [x] One-shot command execution, live stdout/stderr streaming, exit-code propagation
-- [x] Safe command parsing for both `"docker ps"` and `docker ps` forms
-- [x] `--stdin deploy.sh` remote-script mode
-- [x] Tkinter Editor GUI + stub-configuring build driver (Rust launcher via `launcher-rs/`)
-- [x] Automated tests (config, credentials, CLI parsing, exit-code propagation, build)
-- [x] GitHub Actions for Windows / macOS / Linux builds + a test matrix
-- [x] Interactive PTY shell — full on POSIX (raw mode, resize, restore), threaded fallback on Windows
-
-Deliberately *after* the MVP (documented, not yet hardened): guaranteed
-full-screen TUI fidelity (vim/htop/tmux) inside legacy Windows consoles, and
-code-signing of macOS/Windows binaries.
-
-## 3. Project layout
-
-```
-falco/
-  editor/            # GUI + build driver + entry-script template
-  launcher/          # runtime that generated binaries execute
-  shared/            # config model + errors (used by both)
-  build/             # headless build script for CI
-  tests/             # pytest suite
-  .github/workflows/ # tests + per-OS build workflows
-  pyproject.toml
-  README.md
-```
-
-## 4. Build instructions
-
-### Prerequisites
-- Python 3.12+
-
-### Set up a dev environment
-```bash
-python -m venv .venv
-# Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
-pip install -e ".[dev,build]"
-```
-
-### Run the tests
-```bash
-pytest
-```
-
-### Run the Editor (GUI)
-```bash
-python -m editor
-```
-Fill in the fields, click **Build launcher**, choose an output folder. The
-generated executable appears there.
-
-### Build a launcher headlessly (what CI uses)
-```bash
-python build/build_launcher.py --name meks --host 203.0.113.10 --user deploy --port 22 --output meks.exe --out-dir dist
-```
-
-> **Cross-OS note:** a Windows `.exe` must be built on Windows and a macOS
-> binary on macOS. That is why cross-platform releases go through GitHub Actions
-> (below) rather than one machine.
-
-## 5. GitHub Actions
-
-| Workflow                         | Runner          | Trigger            | Produces                    |
-|----------------------------------|-----------------|--------------------|-----------------------------|
-| `.github/workflows/tests.yml`        | ubuntu/win/macOS | push / PR          | test results (3-OS matrix)  |
-| `.github/workflows/release.yml`      | ubuntu/win/macOS | push to `main`     | **GitHub Release** with the Falco Editor for all 3 OSes |
-| `.github/workflows/build-windows.yml`| windows-latest  | manual (dispatch)  | `*.exe` launcher artifact   |
-| `.github/workflows/build-macos.yml`  | macos-latest    | manual (dispatch)  | macOS launcher artifact     |
-| `.github/workflows/build-linux.yml`  | ubuntu-latest   | manual (dispatch)  | Linux launcher (optional)   |
-
-### Releasing the Editor (automatic)
-
-Every push to `main` runs `release.yml`, which builds the **Falco Editor** on
-Windows, macOS and Linux (`build/build_editor.py`) and publishes them together
-as a new GitHub Release (`build-<run_number>`):
-
-- `falco-editor-windows.exe`
-- `falco-editor-macos`
-- `falco-editor-linux`
-
-The Editor authors and validates launcher configuration. Because a frozen
-binary has no Python toolchain inside it, **compiling launchers** is done from a
-Python environment (`build/build_launcher.py`) or the per-OS *build-** workflows.
-
-### Generated `how-to-use.md`
-
-Every launcher the Editor builds is accompanied by a small `how-to-use.md` next
-to the executable, written for humans and AI agents. It documents the commands,
-confirms **no password is embedded or leaked** (OS keystore only; never on
-argv/env/files/metadata), states the session is **SSH-encrypted**, and honestly
-notes the trust-on-connect host-key caveat.
-
-To build a signed-per-your-account launcher: open the repo's **Actions** tab →
-pick *build-windows* / *build-macos* → **Run workflow**, enter the launcher name,
-host, user and port. Download the artifact when it finishes. **No password is
-entered in CI** — the launcher collects and stores it locally on first run.
-
-## 6. Security limitations
-
-Read this before deploying Falco launchers.
-
-- **Automatic host-key acceptance defeats server-authentication.** Launchers use
-  Paramiko's `AutoAddPolicy`, which accepts *unknown and changed* host
-  fingerprints silently. This removes SSH's protection against
-  **man-in-the-middle attacks and server impersonation**: if an attacker can
-  redirect or spoof the host/IP, the launcher will connect and send your
-  password to the attacker's server without warning. This is a usability/
-  security trade-off chosen to match the spec. Only point launchers at hosts on
-  networks you trust, and prefer this for low-stakes automation over hostile
-  networks. A future hardening option is trust-on-first-use pinning.
-- **Password auth, not keys.** Falco intentionally uses passwords. Key-based auth
-  is stronger; Falco's model exists for environments that require passwords.
-- **The password is only as protected as the OS keystore.** It is stored via
-  `keyring` (Windows Credential Manager / macOS Keychain), so any process running
-  as your user that can read that store can read the password. Falco never puts
-  the secret on a command line, in an environment variable, in a generated file,
-  or in the executable's metadata — but it cannot protect against a compromised
-  user account.
-- **Binaries are unsigned.** Generated executables are not code-signed. Windows
-  SmartScreen and macOS Gatekeeper will warn on first run.
-- **Embedded config is readable.** Host/port/username/credential-id are visible
-  in the binary. They are not secrets, but treat them as disclosed.
-
-## 7. Example launcher configuration & usage
-
-Editor input:
-
-| Field            | Value              |
-|------------------|--------------------|
-| Launcher name    | `meks`             |
-| SSH host / IP    | `203.0.113.10`     |
-| SSH port         | `22`               |
-| SSH username     | `deploy`           |
-| Output filename  | `meks.exe`         |
-
-The embedded (non-secret) config becomes:
-
-```json
-{
-  "launcher_name": "meks",
-  "host": "203.0.113.10",
-  "username": "deploy",
-  "port": 22,
-  "credential_id": "falco:meks:deploy@203.0.113.10:22",
-  "schema_version": 1
-}
-```
-
-### Usage
+Download the Editor for your OS from the
+[Releases](https://github.com/Media-Boost-Group/falco/releases) page, or build
+it yourself:
 
 ```bash
-# One-shot command (single quoted string — operators preserved):
-meks.exe "cd /var/www && git pull && docker compose up -d"
-
-# One-shot command (bare args — re-quoted safely, run only remotely):
-meks.exe docker ps
-
-# Send a local script to run on the server:
-meks.exe --stdin deploy.sh
-
-# Interactive shell (PTY: history, tab-completion, colours, sudo prompts):
-meks.exe
-
-# Forget the stored password and re-prompt next run:
-meks.exe --reset-password
+cd launcher-rs && cargo build --release        # build the launcher core (needs Rust)
+pip install -e ".[build]"                       # editor build tooling (needs Python 3.12+)
+python build/build_editor.py --out-dir dist     # produces the Falco Editor
 ```
 
-### File transfer (SFTP)
+## Troubleshooting
 
-The launcher can also move files over the **same** connection and stored
-credential:
+**A launcher hangs or times out connecting.** That almost always means you're
+not logged in / don't have access to the server yet — not a bug. Check that you
+can reach it with a normal client first (`ssh user@host`), that you're on the
+right network/VPN, and that your account is active on that server.
 
-```bash
-meks.exe --upload ./local-file /remote/path
-meks.exe --download /remote/file ./local-path
-meks.exe --list /remote/directory
-meks.exe --mkdir /remote/directory
-meks.exe --remove /remote/file
-meks.exe --move /remote/source /remote/destination
+## How it works (for the curious)
 
-# Recursive:
-meks.exe --upload-dir ./dist /var/www/site/dist
-meks.exe --download-dir /var/www/site/logs ./logs
-```
+- `editor/` — the desktop Editor (Python + Tkinter) and the build step.
+- `launcher-rs/` — the launcher itself, written in Rust (`russh` for SSH/SFTP).
+  Built once per OS into a config-less "stub".
+- `shared/` — the small, non-secret config model shared by both.
 
-Behaviour:
-
-- Progress is streamed to the terminal; names and directory structure are preserved.
-- Existing files are **never overwritten** unless `--overwrite` is given.
-- `--mkdirs` creates missing destination directories.
-- Downloads land in a temp file and are renamed only after a complete transfer.
-- Any failure exits non-zero.
-
-On the **first** command the launcher prompts:
-
-```
-SSH password for deploy@203.0.113.10:
-```
-
-Nothing is echoed. The password is saved to the OS keystore and reused silently
-afterwards. The launcher exits with the **remote command's** exit code, so it
-composes cleanly in scripts and CI.
-
-### Developer shortcut (no build required)
-
-You can run the launcher runtime directly against a config during development:
-
-```bash
-# PowerShell
-$env:FALCO_CONFIG_JSON = '{"launcher_name":"meks","host":"203.0.113.10","username":"deploy","port":22}'
-python -m launcher "docker ps"
-```
+"Building" a launcher doesn't compile anything: the Editor copies the prebuilt
+stub and appends your server config as a trailer the launcher reads from its own
+file at startup. That's why builds are instant, single-file, and can target any
+OS from any OS.
 
 ## License
 

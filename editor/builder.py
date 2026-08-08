@@ -200,8 +200,8 @@ def build_all_launchers(
 ) -> MultiBuildResult:
     """Generate one launcher per bundled stub (Windows / macOS / Linux).
 
-    Output names are disambiguated per platform, e.g. ``meks-windows.exe``,
-    ``meks-macos``, ``meks-linux``. Platforms whose stub is not bundled are
+    Output names are disambiguated per platform, e.g. ``server-client-X-windows.exe``,
+    ``server-client-X-macos``, ``server-client-X-linux``. Platforms whose stub is not bundled are
     skipped and reported (never silently dropped).
     """
 

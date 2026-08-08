@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       name:
-        description: "Launcher name (e.g. meks)"
+        description: "Launcher name (e.g. server-client-X)"
         required: true
-        default: "meks"
+        default: "server-client-X"
       host:
         description: "SSH host or IP"
         required: true
@@ -24,7 +24,7 @@ on:
       output:
         description: "Output filename"
         required: true
-        default: "meks.exe"
+        default: "server-client-X.exe"
 
 jobs:
   build:

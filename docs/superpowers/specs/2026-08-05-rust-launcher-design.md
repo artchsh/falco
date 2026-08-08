@@ -114,7 +114,7 @@ Ported 1:1 from the Python launcher and guarded by tests.
 
 - **Interactive** (no args): PTY shell.
 - **Command**: one arg passed verbatim; multiple args individually
-  shell-quoted and joined (so `meks docker ps` → `docker ps`, and args with
+  shell-quoted and joined (so `server-client-X docker ps` → `docker ps`, and args with
   spaces/metacharacters survive).
 - **`--stdin <file>`**: pipe the file's contents into a remote `/bin/sh -s`.
 - **SFTP**: selected by presence of any SFTP action flag.

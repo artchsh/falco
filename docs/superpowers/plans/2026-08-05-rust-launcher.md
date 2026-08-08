@@ -234,15 +234,15 @@ mod tests {
 
     #[test]
     fn credential_id_matches_python_format() {
-        let id = default_credential_id("meks", "root", "1.2.3.4", 22);
-        assert_eq!(id, "falco:meks:root@1.2.3.4:22");
+        let id = default_credential_id("server-client-X", "root", "1.2.3.4", 22);
+        assert_eq!(id, "falco:server-client-X:root@1.2.3.4:22");
     }
 
     #[test]
     fn from_json_parses_all_fields() {
-        let json = r#"{"launcher_name":"meks","host":"h","username":"u","port":2222,"credential_id":"cid","schema_version":1}"#;
+        let json = r#"{"launcher_name":"server-client-X","host":"h","username":"u","port":2222,"credential_id":"cid","schema_version":1}"#;
         let cfg = LauncherConfig::from_json(json).unwrap();
-        assert_eq!(cfg.launcher_name, "meks");
+        assert_eq!(cfg.launcher_name, "server-client-X");
         assert_eq!(cfg.port, 2222);
         assert_eq!(cfg.credential_id, "cid");
     }
@@ -334,11 +334,11 @@ use falco_stub::config::{append_config, read_config_from_bytes, LauncherConfig};
 
 fn sample() -> LauncherConfig {
     LauncherConfig {
-        launcher_name: "meks".into(),
+        launcher_name: "server-client-X".into(),
         host: "1.2.3.4".into(),
         username: "root".into(),
         port: 22,
-        credential_id: "falco:meks:root@1.2.3.4:22".into(),
+        credential_id: "falco:server-client-X:root@1.2.3.4:22".into(),
         schema_version: 1,
     }
 }
@@ -816,7 +816,7 @@ mod tests {
 
     fn cfg() -> LauncherConfig {
         LauncherConfig {
-            launcher_name: "meks".into(), host: "h".into(), username: "u".into(),
+            launcher_name: "server-client-X".into(), host: "h".into(), username: "u".into(),
             port: 22, credential_id: "cid".into(), schema_version: 1,
         }
     }
@@ -1873,7 +1873,7 @@ from shared.config import LauncherConfig
 
 def test_append_config_writes_trailer():
     cfg = LauncherConfig.create(
-        launcher_name="meks", host="1.2.3.4", username="root", port=22
+        launcher_name="server-client-X", host="1.2.3.4", username="root", port=22
     )
     stub = b"FAKE-STUB"
     blob = append_config(stub, cfg)
@@ -2038,7 +2038,7 @@ from shared.config import LauncherConfig
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build a Falco launcher from config JSON.")
     parser.add_argument("config", help="Path to launcher config JSON")
-    parser.add_argument("--output-name", required=True, help="e.g. meks.exe")
+    parser.add_argument("--output-name", required=True, help="e.g. server-client-X.exe")
     parser.add_argument("--out-dir", default="dist", help="Output directory")
     args = parser.parse_args(argv)
 
@@ -2064,10 +2064,10 @@ Expected: PASS. Delete or update any old test that asserted on `pyinstaller_comm
 Run:
 ```bash
 cd launcher-rs && cargo build --release && cd ..
-python -m build.build_launcher <(python -c "from shared.config import LauncherConfig; print(LauncherConfig.create(launcher_name='meks', host='127.0.0.1', username='root').to_json())") --output-name meks --out-dir /tmp/falco-out || true
+python -m build.build_launcher <(python -c "from shared.config import LauncherConfig; print(LauncherConfig.create(launcher_name='server-client-X', host='127.0.0.1', username='root').to_json())") --output-name server-client-X --out-dir /tmp/falco-out || true
 ```
 (Windows: write the config JSON to a temp file first, then pass its path.)
-Expected: a `meks`/`meks.exe` appears in the out dir; running it with no config-reachable server still proves the trailer path (`falco: Authentication...`/connection error, not "not configured").
+Expected: a `server-client-X`/`server-client-X.exe` appears in the out dir; running it with no config-reachable server still proves the trailer path (`falco: Authentication...`/connection error, not "not configured").
 
 - [ ] **Step 8: Commit**
 
@@ -2141,7 +2141,7 @@ Because the stub is built on the same runner (Step 2), `build/build_editor.py`
 
 - [ ] **Step 4: Add a smoke test job**
 
-Add a job (Linux) that: builds the stub, starts a throwaway `sshd` in a container (or `docker run` an openssh image with a known password), generates a launcher via `build/build_launcher.py`, and runs `./meks "echo hello"` asserting stdout `hello` and exit `0`, plus `./meks --nonexistent-should-parse-ok? ` sanity. Keep it minimal but real — this is the automated replacement for the PTY/SSH tests that can't run as unit tests.
+Add a job (Linux) that: builds the stub, starts a throwaway `sshd` in a container (or `docker run` an openssh image with a known password), generates a launcher via `build/build_launcher.py`, and runs `./server-client-X "echo hello"` asserting stdout `hello` and exit `0`, plus `./server-client-X --nonexistent-should-parse-ok? ` sanity. Keep it minimal but real — this is the automated replacement for the PTY/SSH tests that can't run as unit tests.
 
 ```yaml
   smoke:
@@ -2272,7 +2272,7 @@ git commit -m "chore: bundle Rust stub in editor, retire Python launcher"
 - russh pure-Rust SSH → Tasks 7, 11. ✅
 - Full parity: CLI (Task 5), credentials (Task 6), command/stdin exec (Task 7), PTY (Task 8), SFTP 8 ops (Tasks 9–10), exit codes (Tasks 2, 11). ✅
 - Config trailer format → Tasks 4 & 13 use the identical layout (`json + u64 LE + b"FALCOCFG"`). ✅
-- Credential id format → Task 3 test pins `falco:meks:root@1.2.3.4:22`. ✅
+- Credential id format → Task 3 test pins `falco:server-client-X:root@1.2.3.4:22`. ✅
 - Auto-accept host keys → Task 7 `check_server_key -> Ok(true)`. ✅
 - Size 1–3 MB (≤5 MB gate) → Task 12. ✅
 - Codesigning caveat → documented in spec; no task attempts signing (correct). ✅

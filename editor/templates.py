@@ -92,6 +92,17 @@ This is safe to run in automated environments:
   history, CI logs, or crash dumps.
 - To clear the saved password:  `{name} --reset-password`
 
+## Troubleshooting
+
+- **Connection or file transfer times out.** The server is unreachable from this
+  machine, or your account is not set up on it yet. Before using `{name}`, make
+  sure you can log in as `{username}@{host}` with a normal SSH client (e.g.
+  `ssh {username}@{host}`). A timeout almost always means "not logged in / no
+  access to the server", not a bug in the launcher — check the host, port,
+  network/VPN, and that your account is active on that server.
+- **"Authentication failed."** The stored password is wrong. Clear it with
+  `{name} --reset-password` and run again to re-enter it.
+
 ## Connection security — honest summary
 
 - **The entire session is encrypted by the SSH protocol** — authentication,
