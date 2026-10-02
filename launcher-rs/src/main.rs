@@ -1,7 +1,9 @@
 //! The launcher entry point: load embedded config, parse argv, resolve the
 //! password, connect, dispatch by mode, and map errors to the exit-code contract.
 
+use std::io::IsTerminal;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use falco_stub::cli::{self, Mode};
 use falco_stub::config::{load_embedded_config, LauncherConfig};
@@ -23,7 +25,7 @@ async fn run() -> i32 {
     let config = match load_embedded_config() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("falco: {e}");
+            eprintln!("{}", e.diagnostic_json());
             return 2;
         }
     };
@@ -33,30 +35,27 @@ async fn run() -> i32 {
     let request = match cli::parse_args(&argv) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("falco: {e}");
+            eprintln!("{}", e.diagnostic_json());
             return 2;
         }
     };
 
-    // 3. Resolve the password (prompt once, store).
-    let store = OsKeyStore;
+    let store = Arc::new(OsKeyStore);
     if request.reset_password {
-        credentials::delete_password(&config, &store);
+        if let Err(e) = credentials::delete_password(&config, store.as_ref()) {
+            eprintln!("{}", e.diagnostic_json());
+            return e.exit_code();
+        }
     }
-    let password =
-        match credentials::resolve_password(&config, &store, &|label| hidden_prompt(label)) {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("falco: {e}");
-                return 3;
-            }
-        };
-
-    // 4. Connect and dispatch.
-    match dispatch(&config, &password, &request).await {
+    let options = ssh::ConnectOptions {
+        accept_new_key: request.accept_new_key,
+        interactive: std::io::stdin().is_terminal() && std::io::stderr().is_terminal(),
+        ..Default::default()
+    };
+    match dispatch(&config, options, store, &request).await {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("falco: {e}");
+            eprintln!("{}", e.diagnostic_json());
             e.exit_code()
         }
     }
@@ -64,10 +63,16 @@ async fn run() -> i32 {
 
 async fn dispatch(
     config: &LauncherConfig,
-    password: &str,
+    options: ssh::ConnectOptions,
+    store: Arc<OsKeyStore>,
     request: &cli::LaunchRequest,
 ) -> Result<i32, FalcoError> {
-    let session = ssh::connect(config, password).await?;
+    let script = if let Some(path) = &request.stdin_path {
+        Some(std::fs::read(path).map_err(|e| FalcoError::new("LOCAL_FILE_READ_FAILED", format!("Could not read script {path}: {e}"), "Check the local file path and read permissions before retrying. No remote script was started.", 2))?)
+    } else {
+        None
+    };
+    let session = ssh::connect_with_store(config, options, store, &hidden_prompt).await?;
 
     let result = match request.mode {
         Mode::Interactive => interactive::start_interactive_shell(&session).await,
@@ -76,14 +81,9 @@ async fn dispatch(
             session.run_command(cmd).await
         }
         Mode::Stdin => {
-            let path = request.stdin_path.as_deref().unwrap_or("");
-            match std::fs::read(path) {
-                Ok(bytes) => session.run_script(&bytes).await,
-                Err(e) => {
-                    session.disconnect().await;
-                    return Err(FalcoError::Config(format!("cannot read {path}: {e}")));
-                }
-            }
+            session
+                .run_script(script.as_deref().unwrap_or_default())
+                .await
         }
         Mode::Sftp => {
             let op = request.sftp.as_ref().expect("sftp op present");

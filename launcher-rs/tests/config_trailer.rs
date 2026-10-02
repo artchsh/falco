@@ -31,9 +31,17 @@ fn read_without_trailer_errors() {
 #[test]
 fn legacy_configuration_defaults_and_invalid_versions_fail() {
     let cfg = LauncherConfig::from_json(r#"{"launcher_name":"n","host":"h","username":"u","port":22,"credential_id":"c","schema_version":1}"#).unwrap();
-    assert_eq!(serde_json::to_value(&cfg).unwrap()["auth_method"], "password");
-    for extra in [r#""schema_version":99"#, r#""schema_version":2,"auth_method":"private_key","encrypted_private_key":"secret""#] {
-        let json = format!(r#"{{"launcher_name":"n","host":"h","username":"u","port":22,"credential_id":"c",{extra}}}"#);
+    assert_eq!(
+        serde_json::to_value(&cfg).unwrap()["auth_method"],
+        "password"
+    );
+    for extra in [
+        r#""schema_version":99"#,
+        r#""schema_version":2,"auth_method":"private_key","encrypted_private_key":"secret""#,
+    ] {
+        let json = format!(
+            r#"{{"launcher_name":"n","host":"h","username":"u","port":22,"credential_id":"c",{extra}}}"#
+        );
         assert!(LauncherConfig::from_json(&json).is_err());
     }
 }

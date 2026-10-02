@@ -13,9 +13,11 @@
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, size as term_size};
 use russh::client;
 use russh::ChannelMsg;
+use std::io::IsTerminal;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::errors::{FalcoError, FResult};
+use crate::errors::{FResult, FalcoError};
 use crate::ssh::SshSession;
 
 fn term_type() -> String {
@@ -23,26 +25,35 @@ fn term_type() -> String {
 }
 
 pub async fn start_interactive_shell(session: &SshSession) -> FResult<i32> {
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        return Err(FalcoError::new("TERMINAL_REQUIRED", "An interactive SSH shell requires a local terminal.", "AI agents should pass a remote command, --stdin script, or an SFTP action. Use a user terminal for an interactive shell.", 2));
+    }
     let (cols, rows) = term_size().unwrap_or((80, 24));
-
-    let mut channel = session
-        .handle()
-        .channel_open_session()
+    let mut channel = session.open_channel().await?;
+    let requests = async {
+        channel
+            .request_pty(false, &term_type(), cols as u32, rows as u32, 0, 0, &[])
+            .await
+            .map_err(|e| FalcoError::Remote(format!("Could not request PTY: {e}")))?;
+        channel
+            .request_shell(true)
+            .await
+            .map_err(|e| FalcoError::Remote(format!("Could not request shell: {e}")))
+    };
+    tokio::time::timeout(session.timeout(), requests)
         .await
-        .map_err(|e| FalcoError::Remote(format!("Failed to open session: {e}")))?;
-
-    channel
-        .request_pty(false, &term_type(), cols as u32, rows as u32, 0, 0, &[])
-        .await
-        .map_err(|e| FalcoError::Remote(format!("Failed to request PTY: {e}")))?;
-    channel
-        .request_shell(true)
-        .await
-        .map_err(|e| FalcoError::Remote(format!("Failed to start shell: {e}")))?;
+        .map_err(|_| {
+            FalcoError::new(
+                "SHELL_START_TIMEOUT",
+                "The server did not respond to the shell request.",
+                "Check the configured account's shell and SSH server restrictions.",
+                4,
+            )
+        })??;
 
     enable_raw_mode().map_err(|e| FalcoError::Remote(format!("Failed to set raw mode: {e}")))?;
 
-    let result = bridge(&mut channel).await;
+    let result = bridge(&mut channel, session.timeout()).await;
 
     // ALWAYS restore the terminal, even after error/disconnect.
     let _ = disable_raw_mode();
@@ -51,47 +62,65 @@ pub async fn start_interactive_shell(session: &SshSession) -> FResult<i32> {
     result
 }
 
-async fn bridge(channel: &mut russh::Channel<client::Msg>) -> FResult<i32> {
+async fn bridge(channel: &mut russh::Channel<client::Msg>, timeout: Duration) -> FResult<i32> {
     let mut stdin = tokio::io::stdin();
     let mut stdout = tokio::io::stdout();
     let mut buf = [0u8; 32768];
-    let mut code = 0i32;
+    let mut code = None;
+    let mut stdin_open = true;
+    let mut started = false;
+    let startup = tokio::time::sleep(timeout);
+    tokio::pin!(startup);
 
     loop {
         tokio::select! {
             // Local keystrokes -> remote.
-            n = stdin.read(&mut buf) => {
+            n = stdin.read(&mut buf), if stdin_open => {
                 match n {
-                    Ok(0) => { let _ = channel.eof().await; }
+                    Ok(0) => { stdin_open = false; channel.eof().await.map_err(|e| FalcoError::Remote(format!("Failed to send terminal EOF: {e}")))?; }
                     Ok(n) => {
-                        if channel.data(&buf[..n]).await.is_err() { break; }
+                        channel.data(&buf[..n]).await.map_err(|e| FalcoError::Remote(format!("Failed to send terminal input: {e}")))?;
                     }
-                    Err(_) => break,
+                    Err(e) => return Err(FalcoError::Remote(format!("Failed to read local terminal: {e}"))),
                 }
             }
             // Remote output -> local terminal.
             msg = channel.wait() => {
                 match msg {
                     Some(ChannelMsg::Data { data }) => {
-                        stdout.write_all(&data).await.ok();
-                        stdout.flush().await.ok();
+                        started = true;
+                        stdout.write_all(&data).await.map_err(|e| FalcoError::Remote(format!("Failed to write terminal output: {e}")))?;
+                        stdout.flush().await.map_err(|e| FalcoError::Remote(format!("Failed to flush terminal output: {e}")))?;
                     }
                     Some(ChannelMsg::ExtendedData { data, .. }) => {
-                        stdout.write_all(&data).await.ok();
-                        stdout.flush().await.ok();
+                        started = true;
+                        stdout.write_all(&data).await.map_err(|e| FalcoError::Remote(format!("Failed to write terminal output: {e}")))?;
+                        stdout.flush().await.map_err(|e| FalcoError::Remote(format!("Failed to flush terminal output: {e}")))?;
                     }
                     Some(ChannelMsg::ExitStatus { exit_status }) => {
-                        code = exit_status as i32;
+                        started = true;
+                        code = Some(exit_status as i32);
                     }
-                    Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => break,
+                    Some(ChannelMsg::Success) => started = true,
+                    Some(ChannelMsg::Failure) => return Err(FalcoError::new("SHELL_REQUEST_REJECTED", "The server rejected the interactive shell.", "Check the account's shell and SSH restrictions.", 4)),
+                    Some(ChannelMsg::ExitSignal { signal_name, .. }) => return Err(FalcoError::new("REMOTE_COMMAND_SIGNALLED", format!("Remote shell terminated by {signal_name:?}."), "Check the remote shell/process logs before reconnecting.", 4)),
+                    Some(ChannelMsg::Close) | None => break,
                     _ => {}
                 }
             }
+            _ = &mut startup, if !started => return Err(FalcoError::new("SHELL_START_TIMEOUT", "The server did not acknowledge the interactive shell request.", "Check the account's shell and SSH server restrictions.", 4)),
             // TODO(resize parity): add a third arm reading
             // crossterm::event::EventStream for Event::Resize(cols, rows) and call
             // channel.window_change(cols as u32, rows as u32, 0, 0). Add only after
             // the basic bridge builds and works.
         }
     }
-    Ok(code)
+    code.ok_or_else(|| {
+        FalcoError::new(
+            "REMOTE_EXIT_STATUS_MISSING",
+            "The shell connection closed without an exit status.",
+            "Check server availability and shell state before reconnecting.",
+            4,
+        )
+    })
 }

@@ -8,7 +8,7 @@
 //! plus SFTP actions (see `sftp_spec`) and modifiers `--overwrite`, `--mkdirs`,
 //! and the local-only `--reset-password` / `--reset-credential`.
 
-use crate::errors::{FalcoError, FResult};
+use crate::errors::{FResult, FalcoError};
 
 #[derive(Debug, PartialEq)]
 pub enum Mode {
@@ -43,6 +43,7 @@ pub struct LaunchRequest {
     pub stdin_path: Option<String>,
     pub sftp: Option<SftpOp>,
     pub reset_password: bool,
+    pub accept_new_key: bool,
     pub overwrite: bool,
     pub mkdirs: bool,
 }
@@ -55,6 +56,7 @@ impl LaunchRequest {
             stdin_path: None,
             sftp: None,
             reset_password: false,
+            accept_new_key: false,
             overwrite: false,
             mkdirs: false,
         }
@@ -156,7 +158,7 @@ fn parse_sftp(mut args: Vec<String>) -> FResult<LaunchRequest> {
     Ok(req)
 }
 
-pub fn parse_args(argv: &[String]) -> FResult<LaunchRequest> {
+fn parse_inner(argv: &[String]) -> FResult<LaunchRequest> {
     let mut args: Vec<String> = argv.to_vec();
 
     // SFTP mode is selected by the presence of an SFTP action flag anywhere.
@@ -196,5 +198,29 @@ pub fn parse_args(argv: &[String]) -> FResult<LaunchRequest> {
     let mut req = LaunchRequest::bare(Mode::Command);
     req.command = Some(build_command(&args));
     req.reset_password = reset;
+    Ok(req)
+}
+
+/// Local trust override is recognized only before a remote operation, never
+/// stripped from a command's trailing arguments.
+pub fn parse_args(argv: &[String]) -> FResult<LaunchRequest> {
+    let mut args = argv.to_vec();
+    let mut accept = false;
+    let mut reset = false;
+    while let Some(arg) = args.first() {
+        match arg.as_str() {
+            "--accept-new-key" => accept = true,
+            "--reset-credential" | "--reset-password" => reset = true,
+            "--" => {
+                args.remove(0);
+                break;
+            }
+            _ => break,
+        }
+        args.remove(0);
+    }
+    let mut req = parse_inner(&args)?;
+    req.accept_new_key = accept;
+    req.reset_password |= reset;
     Ok(req)
 }

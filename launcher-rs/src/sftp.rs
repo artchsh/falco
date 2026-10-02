@@ -12,7 +12,7 @@ use russh_sftp::client::SftpSession;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::cli::{SftpAction, SftpOp};
-use crate::errors::{FalcoError, FResult};
+use crate::errors::{FResult, FalcoError};
 
 // --------------------------------------------------------------------------- //
 // Pure helpers (unit-tested)
@@ -65,7 +65,7 @@ pub async fn execute(
 }
 
 fn remote_err(context: &str, e: impl std::fmt::Display) -> FalcoError {
-    FalcoError::Remote(format!("{context}: {e}"))
+    FalcoError::new("SFTP_OPERATION_FAILED", format!("{context}: {e}"), "Check the named local/remote path, read/write permissions, disk space and SSH/SFTP server availability. Inspect any partial transfer before retrying.", 4)
 }
 
 async fn remote_exists(sftp: &SftpSession, path: &str) -> bool {
@@ -137,7 +137,9 @@ async fn upload_file(
         print!("\rUploading {remote}: {}", human_bytes(total));
         let _ = std::io::Write::flush(&mut std::io::stdout());
     }
-    dst.flush().await.map_err(|e| remote_err("flush error", e))?;
+    dst.flush()
+        .await
+        .map_err(|e| remote_err("flush error", e))?;
     println!("\rUploaded {remote}: {} ", human_bytes(total));
     Ok(())
 }
@@ -179,7 +181,9 @@ async fn download_file(
         print!("\rDownloading {local}: {}", human_bytes(total));
         let _ = std::io::Write::flush(&mut std::io::stdout());
     }
-    dst.flush().await.map_err(|e| remote_err("flush error", e))?;
+    dst.flush()
+        .await
+        .map_err(|e| remote_err("flush error", e))?;
     drop(dst);
     // Rename temp -> final only on success (no truncated file on interruption).
     tokio::fs::rename(&tmp, local)
@@ -293,8 +297,13 @@ async fn download_dir(
                     .map_err(|e| remote_err("mkdir error", e))?;
                 stack.push((child_remote, child_local));
             } else {
-                download_file(sftp, &child_remote, &child_local.to_string_lossy(), overwrite)
-                    .await?;
+                download_file(
+                    sftp,
+                    &child_remote,
+                    &child_local.to_string_lossy(),
+                    overwrite,
+                )
+                .await?;
             }
         }
     }
@@ -308,7 +317,10 @@ mod tests {
     #[test]
     fn join_remote_uses_forward_slash() {
         assert_eq!(join_remote("/var/www", "index.html"), "/var/www/index.html");
-        assert_eq!(join_remote("/var/www/", "index.html"), "/var/www/index.html");
+        assert_eq!(
+            join_remote("/var/www/", "index.html"),
+            "/var/www/index.html"
+        );
     }
 
     #[test]

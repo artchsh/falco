@@ -1,149 +1,115 @@
-//! Password retrieval and storage backed by the OS credential store.
-//!
-//! The `keyring` crate selects the native backend automatically (Windows
-//! Credential Manager / macOS Keychain / Linux Secret Service). The password is
-//! only ever held in memory; it is never written to disk by Falco, placed on a
-//! command line, or exported as an environment variable.
-
+//! Secrets are retrieved privately from the native OS store and saved after auth.
 use crate::config::LauncherConfig;
-use crate::errors::{FalcoError, FResult};
+use crate::errors::{FResult, FalcoError};
+use zeroize::Zeroizing;
 
-/// The small slice of a keystore Falco uses. A trait so tests can inject a fake.
-pub trait KeyStore {
+pub trait KeyStore: Send + Sync {
     fn get(&self, service: &str, user: &str) -> FResult<Option<String>>;
-    fn set(&self, service: &str, user: &str, password: &str) -> FResult<()>;
+    fn set(&self, service: &str, user: &str, value: &str) -> FResult<()>;
     fn delete(&self, service: &str, user: &str) -> FResult<()>;
 }
-
 pub struct OsKeyStore;
-
+fn store_error(context: &str, error: impl std::fmt::Display) -> FalcoError {
+    FalcoError::Credential(format!("{context}: {error}"))
+}
 impl KeyStore for OsKeyStore {
     fn get(&self, service: &str, user: &str) -> FResult<Option<String>> {
         let entry = keyring::Entry::new(service, user)
-            .map_err(|e| FalcoError::Credential(format!("keyring init failed: {e}")))?;
+            .map_err(|e| store_error("Cannot open OS credential store", e))?;
         match entry.get_password() {
-            Ok(pw) => Ok(Some(pw)),
+            Ok(value) => Ok(Some(value)),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(FalcoError::Credential(format!(
-                "Could not read the password from the OS credential store: {e}"
-            ))),
+            Err(e) => Err(store_error("Cannot read OS credential store", e)),
         }
     }
-
-    fn set(&self, service: &str, user: &str, password: &str) -> FResult<()> {
-        let entry = keyring::Entry::new(service, user)
-            .map_err(|e| FalcoError::Credential(format!("keyring init failed: {e}")))?;
-        entry.set_password(password).map_err(|e| {
-            FalcoError::Credential(format!(
-                "Could not save the password to the OS credential store: {e}"
-            ))
-        })
+    fn set(&self, service: &str, user: &str, value: &str) -> FResult<()> {
+        keyring::Entry::new(service, user)
+            .map_err(|e| store_error("Cannot open OS credential store", e))?
+            .set_password(value)
+            .map_err(|e| store_error("Cannot save to OS credential store", e))
     }
-
     fn delete(&self, service: &str, user: &str) -> FResult<()> {
-        let entry = match keyring::Entry::new(service, user) {
-            Ok(e) => e,
-            Err(_) => return Ok(()),
-        };
-        // Deleting a non-existent entry is not an error worth surfacing.
-        // keyring v3 names this `delete_credential()` (v2 was `delete_password()`).
-        let _ = entry.delete_credential();
-        Ok(())
+        let entry = keyring::Entry::new(service, user)
+            .map_err(|e| store_error("Cannot open OS credential store", e))?;
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(store_error("Cannot delete stored credential", e)),
+        }
     }
 }
-
-/// Prompt for a password without echoing it. Blank input aborts.
 pub fn hidden_prompt(label: &str) -> FResult<String> {
-    let pw = rpassword::prompt_password(label)
-        .map_err(|e| FalcoError::Credential(format!("Could not read password: {e}")))?;
-    if pw.is_empty() {
-        return Err(FalcoError::Credential("No password entered; aborting.".into()));
+    rpassword::prompt_password(label).map_err(|_| {
+        FalcoError::new(
+            "CREDENTIAL_PROMPT_FAILED",
+            "Could not read the hidden credential prompt.",
+            "Ask the user to run this launcher in an interactive terminal.",
+            3,
+        )
+    })
+}
+pub fn secret_service(cfg: &LauncherConfig) -> FResult<String> {
+    if cfg.auth_method == "private_key" {
+        let fingerprint = cfg.private_key()?.fingerprint(ssh_key::HashAlg::Sha256);
+        Ok(format!(
+            "{}:key-passphrase:{fingerprint}",
+            cfg.credential_id
+        ))
+    } else {
+        Ok(cfg.credential_id.clone())
     }
-    Ok(pw)
 }
-
-/// Remove any stored password (used by `--reset-password`).
-pub fn delete_password(cfg: &LauncherConfig, store: &dyn KeyStore) {
-    let _ = store.delete(&cfg.credential_id, &cfg.username);
+pub fn delete_password(cfg: &LauncherConfig, store: &dyn KeyStore) -> FResult<()> {
+    store.delete(&secret_service(cfg)?, &cfg.username)
 }
-
-/// Return a usable password, prompting for and storing one on first use.
-pub fn resolve_password(
+// Deliberately no Debug implementation: secret values never appear in diagnostics.
+pub struct Secret {
+    pub value: Zeroizing<String>,
+    service: String,
+    needs_save: bool,
+}
+pub fn prepare_secret(
     cfg: &LauncherConfig,
     store: &dyn KeyStore,
+    interactive: bool,
     prompt: &dyn Fn(&str) -> FResult<String>,
-) -> FResult<String> {
-    if let Some(existing) = store.get(&cfg.credential_id, &cfg.username)? {
-        if !existing.is_empty() {
-            return Ok(existing);
-        }
+) -> FResult<Secret> {
+    let service = secret_service(cfg)?;
+    if let Some(value) = store
+        .get(&service, &cfg.username)?
+        .filter(|s| !s.is_empty())
+    {
+        return Ok(Secret {
+            value: Zeroizing::new(value),
+            service,
+            needs_save: false,
+        });
     }
-    let label = format!("SSH password for {}@{}: ", cfg.username, cfg.host);
-    let pw = prompt(&label)?;
-    if pw.is_empty() {
-        return Err(FalcoError::Credential("No password entered; aborting.".into()));
+    if !interactive {
+        return Err(FalcoError::new("CREDENTIAL_SETUP_REQUIRED", "No saved credential is available for this launcher on this machine.", "Ask the user to run the launcher once in a terminal and enter the password or key passphrase privately; then retry. Never request the secret in agent chat.", 3));
     }
-    store.set(&cfg.credential_id, &cfg.username, &pw)?;
-    Ok(pw)
+    let kind = if cfg.auth_method == "private_key" {
+        "SSH private-key passphrase"
+    } else {
+        "SSH password"
+    };
+    let value = prompt(&format!("{kind} for {}@{}: ", cfg.username, cfg.host))?;
+    if value.is_empty() {
+        return Err(FalcoError::new(
+            "CREDENTIAL_INPUT_EMPTY",
+            "No credential entered; authentication was cancelled.",
+            "Ask the user to run this launcher in a terminal and enter the credential privately.",
+            3,
+        ));
+    }
+    Ok(Secret {
+        value: Zeroizing::new(value),
+        service,
+        needs_save: true,
+    })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::cell::RefCell;
-    use std::collections::HashMap;
-
-    struct FakeStore {
-        map: RefCell<HashMap<(String, String), String>>,
+pub fn commit_secret(cfg: &LauncherConfig, store: &dyn KeyStore, secret: &Secret) -> FResult<()> {
+    if secret.needs_save {
+        store.set(&secret.service, &cfg.username, &secret.value)?;
     }
-    impl FakeStore {
-        fn new() -> Self {
-            Self {
-                map: RefCell::new(HashMap::new()),
-            }
-        }
-    }
-    impl KeyStore for FakeStore {
-        fn get(&self, s: &str, u: &str) -> FResult<Option<String>> {
-            Ok(self.map.borrow().get(&(s.into(), u.into())).cloned())
-        }
-        fn set(&self, s: &str, u: &str, pw: &str) -> FResult<()> {
-            self.map.borrow_mut().insert((s.into(), u.into()), pw.into());
-            Ok(())
-        }
-        fn delete(&self, s: &str, u: &str) -> FResult<()> {
-            self.map.borrow_mut().remove(&(s.into(), u.into()));
-            Ok(())
-        }
-    }
-
-    fn cfg() -> LauncherConfig {
-        LauncherConfig {
-            launcher_name: "server-client-X".into(),
-            host: "h".into(),
-            username: "u".into(),
-            port: 22,
-            credential_id: "cid".into(),
-            schema_version: 1,
-            auth_method: "password".into(),
-            encrypted_private_key: None,
-            requires_vpn: false,
-        }
-    }
-
-    #[test]
-    fn resolve_prompts_and_stores_on_first_use() {
-        let store = FakeStore::new();
-        let pw = resolve_password(&cfg(), &store, &|_| Ok("secret".into())).unwrap();
-        assert_eq!(pw, "secret");
-        let pw2 = resolve_password(&cfg(), &store, &|_| panic!("should not prompt")).unwrap();
-        assert_eq!(pw2, "secret");
-    }
-
-    #[test]
-    fn blank_password_is_rejected() {
-        let store = FakeStore::new();
-        let err = resolve_password(&cfg(), &store, &|_| Ok(String::new()));
-        assert!(err.is_err());
-    }
+    Ok(())
 }

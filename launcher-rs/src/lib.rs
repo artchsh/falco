@@ -8,3 +8,5 @@ pub mod errors;
 pub mod interactive;
 pub mod sftp;
 pub mod ssh;
+
+pub mod host_keys;

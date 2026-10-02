@@ -64,3 +64,22 @@ fn sftp_leading_arg_is_error() {
 fn two_sftp_actions_is_error() {
     assert!(parse_args(&v(&["--list", "/a", "--mkdir", "/b"])).is_err());
 }
+
+#[test]
+fn accept_new_key_is_local_for_all_modes_and_not_remote_args() {
+    for argv in [
+        v(&["--accept-new-key", "docker ps"]),
+        v(&[
+            "--reset-credential",
+            "--accept-new-key",
+            "--stdin",
+            "script",
+        ]),
+        v(&["--accept-new-key", "--list", "/"]),
+    ] {
+        assert!(parse_args(&argv).unwrap().accept_new_key);
+    }
+    let req = parse_args(&v(&["echo", "--accept-new-key"])).unwrap();
+    assert!(!req.accept_new_key);
+    assert_eq!(req.command.as_deref(), Some("echo --accept-new-key"));
+}
