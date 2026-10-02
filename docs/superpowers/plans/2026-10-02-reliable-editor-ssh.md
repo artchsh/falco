@@ -34,10 +34,10 @@
 
 **Interfaces:** `LauncherConfig.create(..., auth_method='password', encrypted_private_key=None, requires_vpn=False)`; serialized schema 2. `validate_encrypted_private_key(text: str) -> str` validates the OpenSSH envelope, returns normalized text. Rust config mirrors fields and validates on `from_json`.
 
-- [ ] Write tests: schema 1 defaults; schema 2 key/VPN round trip; invalid types and schema rejection; encrypted key accepted, plaintext/truncated key rejected without leaking input.
-- [ ] Run `.venv/bin/python -m pytest tests/test_config.py tests/test_ssh_keys.py`; expect failures for missing behavior.
-- [ ] Implement Python schema/key validation and equivalent Rust config validation. Add runtime capability marker `FALCO_SCHEMA_2` to stub.
-- [ ] Run config/key tests and Rust config tests; expect pass.
+- [x] Write tests: schema 1 defaults; schema 2 key/VPN round trip; invalid types and schema rejection; encrypted key accepted, plaintext/truncated key rejected without leaking input.
+- [x] Run `.venv/bin/python -m pytest tests/test_config.py tests/test_ssh_keys.py`; expect failures for missing behavior.
+- [x] Implement Python schema/key validation and equivalent Rust config validation. Add runtime capability marker `FALCO_SCHEMA_2` to stub.
+- [x] Run config/key tests and Rust config tests; expect pass.
 
 ### Task 2: Reliable build assembly and guides
 
@@ -45,10 +45,10 @@
 
 **Interfaces:** `validate_output_name(output_name: str) -> str`; `build_launcher`/`build_all_launchers` existing return types, explicit target filenames passed to guide renderer; CLI flags `--private-key`, `--requires-vpn`, `--all-platforms`.
 
-- [ ] Write tests for unsafe/reserved basenames, failed staged writes preserving existing launchers, cleanup, schema-capability mismatch and actual filenames/VPN/auth guidance.
-- [ ] Run builder tests; expect failures for missing validation/atomicity/capability checks.
-- [ ] Implement validated staged writes, meaningful filesystem failures, capability check and conditional guide sections; update build CLI.
-- [ ] Run Python suite; expect pass.
+- [x] Write tests for unsafe/reserved basenames, failed staged writes preserving existing launchers, cleanup, schema-capability mismatch and actual filenames/VPN/auth guidance.
+- [x] Run builder tests; expect failures for missing validation/atomicity/capability checks.
+- [x] Implement validated staged writes, meaningful filesystem failures, capability check and conditional guide sections; update build CLI.
+- [x] Run Python suite; expect pass.
 
 ### Task 3: SSH trust, authentication and diagnostics
 
@@ -56,11 +56,11 @@
 
 **Interfaces:** `FalcoError` carries stable code/message/action; `diagnostic_json` emits structured stderr. `LaunchRequest.accept_new_key: bool`. `KeyStore` remains injectable. `connect` verifies trust before resolving authentication and saves prompted credentials after successful auth. Separate host-pin and key-passphrase service IDs.
 
-- [ ] Write tests for flag behavior and JSON, first use/changed key/explicit update/store failure, noninteractive setup, wrong password/passphrase, separate key identity, and real encrypted-key SSH auth.
-- [ ] Run Rust tests; expect failures for absent behavior.
-- [ ] Implement host pinning, bounded DNS/TCP/handshake/auth/session startup, encrypted key decrypt/public-key authentication, TTY-only prompt, post-auth save, structured recovery actions and VPN hints.
-- [ ] Add tests for no exit status and remote signals; run red, implement correct failure propagation; preserve remote status and stdout.
-- [ ] Run Rust suite; expect pass. Format and lint.
+- [x] Write tests for flag behavior and JSON, first use/changed key/explicit update/store failure, noninteractive setup, wrong password/passphrase, separate key identity, and real encrypted-key SSH auth.
+- [x] Run Rust tests; expect failures for absent behavior.
+- [x] Implement host pinning, bounded DNS/TCP/handshake/auth/session startup, encrypted key decrypt/public-key authentication, TTY-only prompt, post-auth save, structured recovery actions and VPN hints.
+- [x] Add tests for no exit status and remote signals; run red, implement correct failure propagation; preserve remote status and stdout.
+- [x] Run Rust suite; expect pass. Format and lint.
 
 ### Task 4: Editor usability and UI
 
@@ -68,9 +68,9 @@
 
 **Interfaces:** queued progress/success/failure events; worker handles Python exceptions and never touches Tk. GUI polls queue and updates build controls on main thread.
 
-- [ ] Write worker tests for success, FalcoError, unexpected filesystem error and safe delayed completion; run red.
-- [ ] Implement queue-based worker, grouped ttk form, key picker/auth controls, VPN checkbox, available-platform choices, consistent name defaults, replacement confirmation, folder action and readable status/log.
-- [ ] Run worker/Python tests; expect pass. Launch actual Tk UI and inspect where available.
+- [x] Write worker tests for success, FalcoError, unexpected filesystem error and safe delayed completion; run red.
+- [x] Implement queue-based worker, grouped ttk form, key picker/auth controls, VPN checkbox, available-platform choices, consistent name defaults, replacement confirmation, folder action and readable status/log.
+- [x] Run worker/Python tests; expect pass. Launch actual Tk UI and inspect where available.
 
 ### Task 5: Release checks, documentation and verification
 

@@ -106,7 +106,14 @@ impl server::Handler for TestHandler {
         .unwrap()
         .clone_public_key()
         .unwrap();
-        if user == "tester" && key == &expected {
+        let rsa = russh::keys::decode_secret_key(
+            include_str!("../../tests/fixtures/encrypted_rsa"),
+            Some("falco-test-passphrase"),
+        )
+        .unwrap()
+        .clone_public_key()
+        .unwrap();
+        if user == "tester" && (key == &expected || key == &rsa) {
             Ok(Auth::Accept)
         } else {
             Ok(Auth::Reject {
@@ -378,4 +385,26 @@ async fn refused_connection_has_precise_code_and_does_not_prompt() {
         .unwrap()
         .diagnostic_json()
         .contains("CONNECTION_REFUSED"));
+}
+
+#[tokio::test]
+async fn encrypted_rsa_key_authenticates() {
+    let port = start_server().await;
+    let mut config = cfg(port);
+    config.schema_version = 2;
+    config.auth_method = "private_key".into();
+    config.encrypted_private_key = Some(include_str!("../../tests/fixtures/encrypted_rsa").into());
+    let session = ssh::connect_with_store(
+        &config,
+        ssh::ConnectOptions {
+            interactive: true,
+            ..Default::default()
+        },
+        Arc::new(Store::default()),
+        &|_| Ok("falco-test-passphrase".into()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(session.run_command("echo rsa").await.unwrap(), 0);
+    session.disconnect().await;
 }

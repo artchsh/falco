@@ -79,6 +79,8 @@ fn private_key_secret_id_is_separate_and_changes_with_the_key() {
         Some(include_str!("../../tests/fixtures/encrypted_ed25519").into());
     let id = credentials::secret_service(&config).unwrap();
     assert_ne!(id, config.credential_id);
+    config.encrypted_private_key = Some(include_str!("../../tests/fixtures/encrypted_rsa").into());
+    assert_ne!(id, credentials::secret_service(&config).unwrap());
     assert!(!format!("{config:?}").contains("OPENSSH"));
 }
 

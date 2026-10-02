@@ -1,4 +1,4 @@
-//! The non-secret launcher configuration and the appended-config trailer.
+//! Launcher configuration without plaintext authentication secrets and the appended-config trailer.
 //!
 //! A launcher binary is a config-less stub with the following trailer appended
 //! at end-of-file by the editor:
@@ -8,8 +8,8 @@
 //! ```
 //!
 //! At startup the launcher reads its own file (`std::env::current_exe`) and
-//! recovers the config from that trailer. Only non-secret fields are embedded;
-//! the SSH password is never stored here.
+//! recovers the config from that trailer. Encrypted private-key material may be embedded;
+//! passwords, passphrases and decrypted private keys are never stored here.
 
 use serde::{Deserialize, Serialize};
 

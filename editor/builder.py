@@ -2,7 +2,7 @@
 prebuilt Rust stubs.
 
 "Building" a launcher does not compile anything. We copy a prebuilt
-``falco-stub`` binary and append the (non-secret) config as a trailer the stub
+``falco-stub`` binary and append the config (including encrypted key material in key mode) as a trailer the stub
 reads from its own file at runtime:
 
     [ ...stub binary... ][ config JSON (utf-8) ][ u64 LE length ][ b"FALCOCFG" ]
@@ -148,7 +148,7 @@ def validate_output_name(output_name: str) -> str:
         raise FalcoError("Output filename must use 1–120 letters, digits, dots, underscores or hyphens, start with a letter/digit, and contain no path.")
     name = _strip_exe_suffix(output_name)
     reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
-    if not name or name.endswith(".") or name.split(".")[0].upper() in reserved:
+    if not name or name.endswith(".") or name.lower() == "how-to-use.md" or name.split(".")[0].upper() in reserved:
         raise FalcoError("Choose an output filename that is not a Windows reserved device name or empty basename.")
     return name
 
@@ -166,6 +166,9 @@ def _assemble(config: LauncherConfig, output_dir: str | Path, outputs: list[tupl
     try:
         stubs = [(append_config(_stub_bytes(stub), config), name) for stub, name in outputs]
         dist = Path(output_dir).resolve()
+        sources = {stub.resolve() for stub, _ in outputs}
+        if any((dist / name).resolve() in sources for _, name in outputs):
+            raise FalcoError("Output files must not replace source launcher stubs. Choose a different folder or filename.")
         dist.mkdir(parents=True, exist_ok=True)
         written: list[Path] = []
         with tempfile.TemporaryDirectory(prefix=".falco-build-", dir=dist) as scratch:

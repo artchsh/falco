@@ -15,7 +15,7 @@ def setup_stub(tmp_path, monkeypatch, contents=b"STUB-FALCO_SCHEMA_2"):
     return LauncherConfig.create(launcher_name="n", host="h", username="u")
 
 
-@pytest.mark.parametrize("name", ["../escape", "/tmp/escape", "..", "CON.exe", "aux", "NUL.txt", "a\\b", "a:b", "hello;echo", "name.", ".exe", "a" * 121])
+@pytest.mark.parametrize("name", ["../escape", "/tmp/escape", "..", "CON.exe", "aux", "NUL.txt", "a\\b", "a:b", "hello;echo", "name.", ".exe", "how-to-use.md", "a" * 121])
 def test_bad_names_do_not_create_files(tmp_path, monkeypatch, name):
     cfg = setup_stub(tmp_path, monkeypatch)
     with pytest.raises(FalcoError):
@@ -28,6 +28,14 @@ def test_old_stub_is_rejected_before_any_output(tmp_path, monkeypatch):
     with pytest.raises(FalcoError, match="stub"):
         builder.build_launcher(cfg, output_name="server", output_dir=tmp_path / "out")
     assert not (tmp_path / "out").exists()
+
+
+def test_output_cannot_replace_source_stub(tmp_path, monkeypatch):
+    cfg = setup_stub(tmp_path, monkeypatch)
+    before = (tmp_path / "stub").read_bytes()
+    with pytest.raises(FalcoError, match="stub"):
+        builder.build_launcher(cfg, output_name="stub", output_dir=tmp_path)
+    assert (tmp_path / "stub").read_bytes() == before
 
 
 def test_failed_guide_staging_preserves_existing_launcher(tmp_path, monkeypatch):

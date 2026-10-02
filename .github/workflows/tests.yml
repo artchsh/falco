@@ -1,6 +1,7 @@
 name: tests
 
 on:
+  workflow_call:
   push:
     branches: [main]
   pull_request:
@@ -47,10 +48,16 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
 
       - name: Build
-        run: cargo build --release
+        run: cargo build --locked --release
 
       - name: Test
-        run: cargo test
+        run: cargo test --locked
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Report stub size
         shell: bash

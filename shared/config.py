@@ -1,12 +1,12 @@
-"""The non-secret launcher configuration model.
+"""Launcher configuration without plaintext authentication secrets.
 
 A :class:`LauncherConfig` holds everything a generated launcher needs *except*
 the password: host, port, username and a ``credential_id`` (the keyring service
 name under which the password is stored on the local machine).
 
-The password is deliberately **never** part of this model, so it can be embedded
-in a generated executable, serialised to JSON, or logged without leaking a
-secret.
+Passwords and passphrases are never part of this model. Private-key mode
+contains an encrypted private key; treat serialized configuration as sensitive
+and never log its key contents.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ def default_credential_id(launcher_name: str, username: str, host: str, port: in
 
 @dataclass(frozen=True)
 class LauncherConfig:
-    """Immutable, non-secret configuration for a single launcher."""
+    """Immutable configuration with optional encrypted private-key material."""
 
     launcher_name: str
     host: str
@@ -112,7 +112,7 @@ class LauncherConfig:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-serialisable dict (never contains a password)."""
+        """Return embedded configuration; never contains a password or passphrase."""
 
         return asdict(self)
 
