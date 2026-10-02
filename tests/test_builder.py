@@ -65,7 +65,7 @@ def test_how_to_use_makes_credential_and_encryption_claims() -> None:
     assert "no password is stored" in doc
     assert "credential store" in doc
     assert "encrypted" in doc
-    assert "man-in-the-middle" in doc or "trust-on-connect" in doc
+    assert "trust on first use" in doc
 
 
 def test_how_to_use_notes_chmod_for_unix_launchers() -> None:
@@ -107,7 +107,7 @@ def _fake_stubs(tmp_path):
     fake = {}
     for target in builder.TARGETS:
         p = stubs_dir / target.bundled_name
-        p.write_bytes(b"STUB-" + target.key.encode())
+        p.write_bytes(b"STUB-" + target.key.encode() + b"FALCO_SCHEMA_2")
         fake[target.key] = p
     return fake
 

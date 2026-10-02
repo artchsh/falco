@@ -128,6 +128,7 @@ pub fn read_config_from_bytes(bytes: &[u8]) -> FResult<LauncherConfig> {
 
 /// Read this executable's own file and recover the embedded config.
 pub fn load_embedded_config() -> FResult<LauncherConfig> {
+    std::hint::black_box(&CAPABILITY_MARKER);
     let exe = std::env::current_exe()
         .map_err(|e| FalcoError::Config(format!("Cannot locate own executable: {e}")))?;
     let bytes = std::fs::read(&exe)

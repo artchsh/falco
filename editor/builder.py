@@ -15,6 +15,9 @@ SSH password is never embedded; only the non-secret config fields are.
 
 from __future__ import annotations
 
+import os
+import re
+import tempfile
 import struct
 import sys
 from dataclasses import dataclass
@@ -139,56 +142,77 @@ def append_config(stub_bytes: bytes, config: LauncherConfig) -> bytes:
     return stub_bytes + json_bytes + length + MAGIC
 
 
-def _write_launcher(stub_path: Path, config: LauncherConfig, out_path: Path) -> None:
-    """Write ``stub + config`` to ``out_path`` and mark non-Windows outputs
-    executable."""
+def validate_output_name(output_name: str) -> str:
+    """Return a portable basename, excluding its packaging extension."""
+    if not isinstance(output_name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,119}", output_name) or output_name.endswith("."):
+        raise FalcoError("Output filename must use 1–120 letters, digits, dots, underscores or hyphens, start with a letter/digit, and contain no path.")
+    name = _strip_exe_suffix(output_name)
+    reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+    if not name or name.endswith(".") or name.split(".")[0].upper() in reserved:
+        raise FalcoError("Choose an output filename that is not a Windows reserved device name or empty basename.")
+    return name
 
-    blob = append_config(stub_path.read_bytes(), config)
-    out_path.write_bytes(blob)
-    if out_path.suffix.lower() != ".exe":
-        try:
-            out_path.chmod(0o755)
-        except OSError:
-            # Best effort — irrelevant on filesystems that ignore Unix perms.
-            pass
+
+def _stub_bytes(stub: Path) -> bytes:
+    data = stub.read_bytes()
+    if b"FALCO_SCHEMA_2" not in data:
+        raise FalcoError("The launcher stub is outdated and cannot use this configuration. Rebuild the stub with the current Rust source or download the latest editor.")
+    return data
+
+
+def _assemble(config: LauncherConfig, output_dir: str | Path, outputs: list[tuple[Path, str]], progress: ProgressFn | None) -> list[Path]:
+    # Validate even callers that directly constructed the dataclass.
+    config = LauncherConfig.from_dict(config.to_dict())
+    try:
+        stubs = [(append_config(_stub_bytes(stub), config), name) for stub, name in outputs]
+        dist = Path(output_dir).resolve()
+        dist.mkdir(parents=True, exist_ok=True)
+        written: list[Path] = []
+        with tempfile.TemporaryDirectory(prefix=".falco-build-", dir=dist) as scratch:
+            stage = Path(scratch)
+            names = [name for _, name in stubs]
+            for blob, name in stubs:
+                path = stage / name
+                path.write_bytes(blob)
+                if not name.endswith(".exe"):
+                    path.chmod(0o755)
+            (stage / "how-to-use.md").write_text(render_how_to_use(config, config.launcher_name, filenames=names), encoding="utf-8")
+            for name in [*names, "how-to-use.md"]:
+                path = stage / name
+                with path.open("rb") as stream:
+                    os.fsync(stream.fileno())
+                os.replace(path, dist / name)
+                written.append(dist / name)
+                _emit(progress, f"Wrote {name}")
+        return written
+    except OSError as exc:
+        replaced = ", ".join(p.name for p in locals().get("written", []))
+        partial = f" Already replaced: {replaced}." if replaced else " Existing output files were preserved."
+        raise FalcoError(f"Could not write launcher output: {exc}.{partial} Check folder permissions and free disk space, then rebuild.") from exc
 
 
 def _resolve_output_path(dist_dir: Path, output_name: str) -> Path:
-    name = _strip_exe_suffix(output_name)
-    if sys.platform == "win32":
-        return dist_dir / f"{name}.exe"
-    return dist_dir / name
+    name = validate_output_name(output_name)
+    return dist_dir / (f"{name}.exe" if _current_os_key() == "windows" else name)
 
 
 def build_launcher(
     config: LauncherConfig,
     *,
     output_name: str,
-    icon_path: str | Path | None = None,  # accepted for API compatibility; unused
+    icon_path: str | Path | None = None,
     output_dir: str | Path,
     progress: ProgressFn | None = None,
 ) -> BuildResult:
-    """Generate a launcher for the **current OS** by configuring its stub."""
-
-    _emit(progress, "Locating prebuilt launcher stub…")
+    """Build the current OS's launcher; stage every file before replacement."""
+    validate_output_name(output_name)
+    if icon_path:
+        raise FalcoError("Custom executable icons are not supported by prebuilt launcher stubs.")
+    _emit(progress, "Locating launcher stub…")
     stub = stub_path_for_current_os()
-    _emit(progress, f"Using stub: {stub}")
-
-    dist_dir = Path(output_dir).resolve()
-    dist_dir.mkdir(parents=True, exist_ok=True)
-    work_dir = dist_dir / f".falco-build-{_strip_exe_suffix(output_name)}"
-    work_dir.mkdir(parents=True, exist_ok=True)
-
-    exe = _resolve_output_path(dist_dir, output_name)
-    _emit(progress, "Embedding launcher configuration (no password embedded)…")
-    _write_launcher(stub, config, exe)
-    _emit(progress, f"Wrote launcher: {exe}")
-
-    how_to_use = dist_dir / "how-to-use.md"
-    how_to_use.write_text(render_how_to_use(config, output_name), encoding="utf-8")
-    _emit(progress, f"Wrote usage guide: {how_to_use}")
-
-    return BuildResult(executable=exe, work_dir=work_dir, how_to_use=how_to_use)
+    exe = _resolve_output_path(Path(output_dir).resolve(), output_name)
+    paths = _assemble(config, output_dir, [(stub, exe.name)], progress)
+    return BuildResult(executable=paths[0], work_dir=exe.parent, how_to_use=paths[-1])
 
 
 def build_all_launchers(
@@ -198,41 +222,13 @@ def build_all_launchers(
     output_dir: str | Path,
     progress: ProgressFn | None = None,
 ) -> MultiBuildResult:
-    """Generate one launcher per bundled stub (Windows / macOS / Linux).
-
-    Output names are disambiguated per platform, e.g. ``server-client-X-windows.exe``,
-    ``server-client-X-macos``, ``server-client-X-linux``. Platforms whose stub is not bundled are
-    skipped and reported (never silently dropped).
-    """
-
+    base = validate_output_name(base_name)
     stubs = discover_stubs()
     if not stubs:
-        raise FalcoError(
-            "No launcher stubs are available to build from. Build them with "
-            "`cd launcher-rs && cargo build --release` (current OS) or use a "
-            "packaged editor that bundles all platforms."
-        )
-
-    dist_dir = Path(output_dir).resolve()
-    dist_dir.mkdir(parents=True, exist_ok=True)
-    base = _strip_exe_suffix(base_name)
-
-    executables: list[Path] = []
-    for target in TARGETS:
-        if target.key not in stubs:
-            _emit(progress, f"Skipping {target.key}: no bundled stub in this editor.")
-            continue
-        out = dist_dir / f"{base}-{target.key}{target.output_ext}"
-        _emit(progress, f"Building {target.key} launcher: {out.name}")
-        _write_launcher(stubs[target.key], config, out)
-        _emit(progress, f"Wrote {out.name}")
-        executables.append(out)
-
-    how_to_use = dist_dir / "how-to-use.md"
-    how_to_use.write_text(render_how_to_use(config, base), encoding="utf-8")
-    _emit(progress, f"Wrote usage guide: {how_to_use}")
-
-    skipped = [t.key for t in TARGETS if t.key not in stubs]
-    return MultiBuildResult(
-        executables=executables, how_to_use=how_to_use, skipped=skipped
-    )
+        raise FalcoError("No launcher stubs are available. Build with `cd launcher-rs && cargo build --release` or use a packaged editor.")
+    skipped = [target.key for target in TARGETS if target.key not in stubs]
+    outputs = [(stubs[t.key], f"{base}-{t.key}{t.output_ext}") for t in TARGETS if t.key in stubs]
+    for key in skipped:
+        _emit(progress, f"Skipping {key}: no bundled stub.")
+    paths = _assemble(config, output_dir, outputs, progress)
+    return MultiBuildResult(executables=paths[:-1], how_to_use=paths[-1], skipped=skipped)
