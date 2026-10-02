@@ -23,6 +23,14 @@ def test_bad_names_do_not_create_files(tmp_path, monkeypatch, name):
     assert not (tmp_path / "out").exists()
 
 
+@pytest.mark.parametrize("name", ["server.exe.exe", "server.exe.bin", "server.APP.EXE"])
+def test_nested_packaging_suffixes_fail_before_writing(tmp_path, monkeypatch, name):
+    cfg = setup_stub(tmp_path, monkeypatch)
+    with pytest.raises(FalcoError):
+        builder.build_launcher(cfg, output_name=name, output_dir=tmp_path / "out")
+    assert not (tmp_path / "out").exists()
+
+
 def test_old_stub_is_rejected_before_any_output(tmp_path, monkeypatch):
     cfg = setup_stub(tmp_path, monkeypatch, b"old stub")
     with pytest.raises(FalcoError, match="stub"):
@@ -63,6 +71,20 @@ def test_guide_uses_actual_single_platform_filename(tmp_path, monkeypatch):
     doc = result.how_to_use.read_text()
     assert "./server \"" in doc
     assert "server-linux" not in doc
+    assert "com.apple.quarantine" not in doc
+
+
+def test_invalid_embedded_key_preserves_existing_output(tmp_path, monkeypatch):
+    setup_stub(tmp_path, monkeypatch)
+    cfg = LauncherConfig(launcher_name="n", host="h", username="u",
+                         auth_method="private_key", encrypted_private_key="malformed key")
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "server").write_bytes(b"existing")
+    with pytest.raises(FalcoError):
+        builder.build_launcher(cfg, output_name="server", output_dir=out)
+    assert (out / "server").read_bytes() == b"existing"
+    assert sorted(p.name for p in out.iterdir()) == ["server"]
 
 
 def test_vpn_hint_and_key_setup_are_conditional():

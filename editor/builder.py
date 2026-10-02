@@ -147,6 +147,8 @@ def validate_output_name(output_name: str) -> str:
     if not isinstance(output_name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,119}", output_name) or output_name.endswith("."):
         raise FalcoError("Output filename must use 1–120 letters, digits, dots, underscores or hyphens, start with a letter/digit, and contain no path.")
     name = _strip_exe_suffix(output_name)
+    if _strip_exe_suffix(name) != name:
+        raise FalcoError("Use at most one optional .exe, .app or .bin output suffix; repeated or mixed suffixes are not supported.")
     reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
     if not name or name.endswith(".") or name.lower() == "how-to-use.md" or name.split(".")[0].upper() in reserved:
         raise FalcoError("Choose an output filename that is not a Windows reserved device name or empty basename.")
@@ -160,26 +162,26 @@ def _stub_bytes(stub: Path) -> bytes:
     return data
 
 
-def _assemble(config: LauncherConfig, output_dir: str | Path, outputs: list[tuple[Path, str]], progress: ProgressFn | None) -> list[Path]:
+def _assemble(config: LauncherConfig, output_dir: str | Path, outputs: list[tuple[Path, str, str]], progress: ProgressFn | None) -> list[Path]:
     # Validate even callers that directly constructed the dataclass.
     config = LauncherConfig.from_dict(config.to_dict())
     try:
-        stubs = [(append_config(_stub_bytes(stub), config), name) for stub, name in outputs]
+        stubs = [(append_config(_stub_bytes(stub), config), name, platform) for stub, name, platform in outputs]
         dist = Path(output_dir).resolve()
-        sources = {stub.resolve() for stub, _ in outputs}
-        if any((dist / name).resolve() in sources for _, name in outputs):
+        sources = {stub.resolve() for stub, _, _ in outputs}
+        if any((dist / name).resolve() in sources for _, name, _ in outputs):
             raise FalcoError("Output files must not replace source launcher stubs. Choose a different folder or filename.")
         dist.mkdir(parents=True, exist_ok=True)
         written: list[Path] = []
         with tempfile.TemporaryDirectory(prefix=".falco-build-", dir=dist) as scratch:
             stage = Path(scratch)
-            names = [name for _, name in stubs]
-            for blob, name in stubs:
+            names = [name for _, name, _ in stubs]
+            for blob, name, platform in stubs:
                 path = stage / name
                 path.write_bytes(blob)
-                if not name.endswith(".exe"):
+                if platform != "windows":
                     path.chmod(0o755)
-            (stage / "how-to-use.md").write_text(render_how_to_use(config, config.launcher_name, filenames=names), encoding="utf-8")
+            (stage / "how-to-use.md").write_text(render_how_to_use(config, config.launcher_name, filenames=names, platforms={name: platform for _, name, platform in stubs}), encoding="utf-8")
             for name in [*names, "how-to-use.md"]:
                 path = stage / name
                 with path.open("rb") as stream:
@@ -214,7 +216,7 @@ def build_launcher(
     _emit(progress, "Locating launcher stub…")
     stub = stub_path_for_current_os()
     exe = _resolve_output_path(Path(output_dir).resolve(), output_name)
-    paths = _assemble(config, output_dir, [(stub, exe.name)], progress)
+    paths = _assemble(config, output_dir, [(stub, exe.name, _current_os_key())], progress)
     return BuildResult(executable=paths[0], work_dir=exe.parent, how_to_use=paths[-1])
 
 
@@ -230,7 +232,7 @@ def build_all_launchers(
     if not stubs:
         raise FalcoError("No launcher stubs are available. Build with `cd launcher-rs && cargo build --release` or use a packaged editor.")
     skipped = [target.key for target in TARGETS if target.key not in stubs]
-    outputs = [(stubs[t.key], f"{base}-{t.key}{t.output_ext}") for t in TARGETS if t.key in stubs]
+    outputs = [(stubs[t.key], f"{base}-{t.key}{t.output_ext}", t.key) for t in TARGETS if t.key in stubs]
     for key in skipped:
         _emit(progress, f"Skipping {key}: no bundled stub.")
     paths = _assemble(config, output_dir, outputs, progress)

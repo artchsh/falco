@@ -207,19 +207,27 @@ pub fn parse_args(argv: &[String]) -> FResult<LaunchRequest> {
     let mut args = argv.to_vec();
     let mut accept = false;
     let mut reset = false;
+    let mut remote_only = false;
     while let Some(arg) = args.first() {
         match arg.as_str() {
             "--accept-new-key" => accept = true,
             "--reset-credential" | "--reset-password" => reset = true,
             "--" => {
                 args.remove(0);
+                remote_only = true;
                 break;
             }
             _ => break,
         }
         args.remove(0);
     }
-    let mut req = parse_inner(&args)?;
+    let mut req = if remote_only && !args.is_empty() {
+        let mut req = LaunchRequest::bare(Mode::Command);
+        req.command = Some(build_command(&args));
+        req
+    } else {
+        parse_inner(&args)?
+    };
     req.accept_new_key = accept;
     req.reset_password |= reset;
     Ok(req)

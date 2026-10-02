@@ -76,8 +76,26 @@
 
 **Files:** `.github/workflows/release.yml`, README, plan checkboxes and execution ledger; new assembly/runtime smoke tests where needed.
 
-- [ ] Make release publication depend on successful Python/Rust verification; use locked Rust builds.
-- [ ] Update README to accurately document encrypted keys, host trust, JSON errors, VPN hint, first-run user setup and supported formats.
-- [ ] Run `.venv/bin/python -m pytest`, `cargo test --locked`, `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`, and `cargo build --locked --release` in the Rust crate. Expected all pass.
-- [ ] Assemble and run a configured release launcher in noninteractive mode; expect structured setup/connection error, never a hang or secret output.
-- [ ] Review the full diff with one fresh reviewer as required by inline execution skill, fix material findings and rerun affected checks. Leave final implementation on the local feature branch without publishing.
+- [x] Make release publication depend on successful Python/Rust verification; use locked Rust builds.
+- [x] Update README to accurately document encrypted keys, host trust, JSON errors, VPN hint, first-run user setup and supported formats.
+- [x] Run `.venv/bin/python -m pytest`, `cargo test --locked`, `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`, and `cargo build --locked --release` in the Rust crate. Expected all pass.
+- [x] Assemble and run a configured release launcher in noninteractive mode; expect structured setup/connection error, never a hang or secret output.
+- [x] Review the full diff with one fresh reviewer as required by inline execution skill, fix material findings and rerun affected checks. Leave final implementation on the local feature branch without publishing.
+
+## Final verification and implementation decisions
+
+- Python: 76 passed with no skips, including native release-launcher assembly/error smoke tests.
+- Rust: 41 passed; `cargo fmt --check`, locked Clippy with warnings denied, and locked release build passed.
+- macOS editor package rebuilt and started successfully without stderr. Real Tk window startup was also verified; OS screenshot capture was unavailable.
+- One fresh final review completed. Fixed interactive runtime shutdown hanging on pending stdin, nested packaging suffixes and executable permissions, malformed OpenSSH public envelopes/ciphertext, and local flags being parsed after `--`. Regression tests reproduce the defects and pass after fixes.
+- Release verification now runs native assembled-launcher smoke tests on each OS. Local runtime validation was macOS only; Linux/Windows execution awaits CI.
+- Additional editor checks cover invalid output folders and inability to start a worker.
+- Existing SFTP transfer mechanics and interactive terminal resizing were outside this change and were not fully audited by the reviewer. No unresolved finding in the requested implementation was deferred.
+
+Decisions recorded during inline execution:
+
+1. Work in place on a new feature branch rather than creating a worktree because the user requested direct inline implementation without review gates. Main was not changed; the cost is a different workspace placement if isolation was preferred.
+2. Raise the Rust source-build floor to 1.85 for precise network-unreachable error kinds. Older source-build toolchains require updating.
+3. Drain the real GUI event queue directly in pytest because Tk update under capture can hang locally. Timer scheduling is covered by real UI startup instead of pytest.
+
+Work remains on local branch `improve/reliable-editor-ssh`; nothing was pushed, merged or published.

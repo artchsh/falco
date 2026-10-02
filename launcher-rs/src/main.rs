@@ -12,11 +12,7 @@ use falco_stub::errors::FalcoError;
 use falco_stub::{interactive, sftp, ssh};
 
 fn main() -> ExitCode {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("tokio runtime");
-    let code = rt.block_on(run());
+    let code = falco_stub::runtime::run_to_exit(run());
     ExitCode::from(code as u8)
 }
 

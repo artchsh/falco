@@ -263,7 +263,11 @@ class FalcoEditor(tk.Tk):
             self._pick_directory()
         if not self.var_directory.get().strip():
             return
-        directory = Path(self.var_directory.get()).expanduser().resolve()
+        try:
+            directory = Path(self.var_directory.get()).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError) as exc:
+            messagebox.showerror("Check output folder", f"Could not resolve the output folder: {exc}. Choose a valid folder and try again.", parent=self)
+            return
         all_platforms = self.var_all_platforms.get()
         names = [f"{base}-{t.key}{t.output_ext}" for t in TARGETS if t.key in self._stubs] if all_platforms else [base + (".exe" if self._current_os == "windows" else "")]
         existing = [name for name in [*names, "how-to-use.md"] if (directory / name).exists()]
@@ -275,7 +279,11 @@ class FalcoEditor(tk.Tk):
         self._append_log(f"Building for {config.username}@{config.host}:{config.port}")
         self.status.set("Building launchers…" if all_platforms else "Building launcher…")
         self.status_label.configure(foreground=INK)
-        threading.Thread(target=run_build, args=(config, self.var_output.get().strip(), directory, all_platforms, self._events), daemon=True).start()
+        try:
+            threading.Thread(target=run_build, args=(config, self.var_output.get().strip(), directory, all_platforms, self._events), daemon=True).start()
+        except RuntimeError as exc:
+            self._events.put(BuildEvent(kind="error", message=f"Could not start build worker: {exc}. Close unused applications and try again."))
+            self._drain_events()
 
     def _set_building(self, building: bool) -> None:
         self._building = building

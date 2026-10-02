@@ -9,6 +9,42 @@ from shared.errors import ConfigError
 MAX_KEY_BYTES = 128 * 1024
 
 
+def _validate_public_blob(data: bytes) -> None:
+    offset = 0
+
+    def read_string() -> bytes:
+        nonlocal offset
+        size = struct.unpack_from(">I", data, offset)[0]
+        offset += 4
+        if size > len(data) - offset:
+            raise ValueError
+        value = data[offset:offset + size]
+        offset += size
+        return value
+
+    algorithm = read_string()
+    if algorithm == b"ssh-ed25519":
+        if len(read_string()) != 32:
+            raise ValueError
+    elif algorithm == b"ssh-rsa":
+        for value in (read_string(), read_string()):
+            # RSA fields are canonical, positive SSH mpints.
+            if not value or value[0] & 0x80 or (len(value) > 1 and value[0] == 0 and not value[1] & 0x80):
+                raise ValueError
+    elif algorithm in (b"ecdsa-sha2-nistp256", b"ecdsa-sha2-nistp384", b"ecdsa-sha2-nistp521"):
+        curve = read_string()
+        if algorithm != b"ecdsa-sha2-" + curve:
+            raise ValueError
+        point = read_string()
+        coordinate_size = {b"nistp256": 32, b"nistp384": 48, b"nistp521": 66}[curve]
+        if not point or point[0] not in (2, 3, 4) or len(point) != 1 + coordinate_size * (2 if point[0] == 4 else 1):
+            raise ValueError
+    else:
+        raise ConfigError("Unsupported private-key algorithm. Use an encrypted OpenSSH Ed25519, RSA or ECDSA key.")
+    if offset != len(data):
+        raise ValueError
+
+
 def validate_encrypted_private_key(text: str) -> str:
     if not isinstance(text, str) or len(text) > MAX_KEY_BYTES:
         raise ConfigError("Select an encrypted OpenSSH private key smaller than 128 KiB.")
@@ -44,7 +80,11 @@ def validate_encrypted_private_key(text: str) -> str:
             raise ConfigError("Unsupported private-key KDF work factor; use 1–1024 bcrypt rounds.")
         count = struct.unpack_from(">I", data, offset)[0]
         offset += 4
-        if count != 1 or not read_string() or not read_string() or offset != len(data):
+        if count != 1:
+            raise ValueError
+        _validate_public_blob(read_string())
+        ciphertext = read_string()
+        if len(ciphertext) < 16 or len(ciphertext) % 16 or offset != len(data):
             raise ValueError
     except (ValueError, struct.error, binascii.Error) as exc:
         raise ConfigError("The encrypted OpenSSH private key is malformed or truncated.") from exc

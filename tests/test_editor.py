@@ -51,3 +51,29 @@ def test_close_with_queued_completion_is_safe(window):
     window._events.put(BuildEvent(kind="error", message="late worker result"))
     window._on_close()
     assert window._closing
+
+
+def test_unresolvable_output_folder_is_reported_without_starting_build(window, monkeypatch):
+    messages = []
+    monkeypatch.setattr(app.messagebox, "showerror", lambda title, message, **kwargs: messages.append(message))
+    window.var_host.set("127.0.0.1")
+    window.var_user.set("user")
+    window.var_directory.set("~falco-user-that-does-not-exist-9e8a1/output")
+    window._on_build()
+    assert messages and "folder" in messages[-1].lower()
+    assert not window._building
+
+
+def test_thread_start_failure_restores_build_controls(window, tmp_path, monkeypatch):
+    messages = []
+    monkeypatch.setattr(app.messagebox, "showerror", lambda title, message, **kwargs: messages.append(message))
+    def fail_start(thread):
+        raise RuntimeError("cannot start build worker")
+    monkeypatch.setattr(app.threading.Thread, "start", fail_start)
+    window.var_host.set("127.0.0.1")
+    window.var_user.set("user")
+    window.var_directory.set(str(tmp_path))
+    window._on_build()
+    assert not window._building
+    assert "disabled" not in window.build_button.state()
+    assert messages and "worker" in messages[-1]

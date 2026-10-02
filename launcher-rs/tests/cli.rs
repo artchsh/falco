@@ -83,3 +83,28 @@ fn accept_new_key_is_local_for_all_modes_and_not_remote_args() {
     assert!(!req.accept_new_key);
     assert_eq!(req.command.as_deref(), Some("echo --accept-new-key"));
 }
+
+#[test]
+fn delimiter_preserves_local_looking_remote_arguments() {
+    for command in [
+        v(&["--reset-credential"]),
+        v(&["--stdin", "script"]),
+        v(&["--remove", "/path"]),
+        v(&["--accept-new-key"]),
+    ] {
+        let mut args = v(&["--"]);
+        args.extend(command.clone());
+        let req = parse_args(&args).unwrap();
+        assert_eq!(req.mode, Mode::Command);
+        assert!(!req.reset_password);
+        assert!(!req.accept_new_key);
+        assert!(req.sftp.is_none());
+        assert_eq!(
+            req.command.as_deref(),
+            Some(build_command(&command).as_str())
+        );
+    }
+    let req = parse_args(&v(&["--accept-new-key", "--", "--reset-credential"])).unwrap();
+    assert!(req.accept_new_key);
+    assert!(!req.reset_password);
+}

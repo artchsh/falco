@@ -697,6 +697,7 @@ dependencies = [
  "async-trait",
  "crossterm",
  "keyring",
+ "libc",
  "rpassword",
  "russh",
  "russh-sftp",

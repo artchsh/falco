@@ -408,3 +408,93 @@ async fn encrypted_rsa_key_authenticates() {
     assert_eq!(session.run_command("echo rsa").await.unwrap(), 0);
     session.disconnect().await;
 }
+
+#[cfg(unix)]
+mod runtime_shutdown {
+    use super::*;
+    use std::os::fd::FromRawFd;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    // This entry point runs only in the subprocess with its stdin/out on a PTY.
+    #[test]
+    fn interactive_timeout_child() {
+        let Ok(port) = std::env::var("FALCO_TEST_PTY_PORT") else {
+            return;
+        };
+        let code = falco_stub::runtime::run_to_exit(async {
+            let options = ssh::ConnectOptions {
+                timeout: Duration::from_millis(200),
+                interactive: true,
+                ..Default::default()
+            };
+            let session = ssh::connect_with_store(
+                &cfg(port.parse().unwrap()),
+                options,
+                Arc::new(Store::default()),
+                &|_| Ok(PASSWORD.into()),
+            )
+            .await
+            .unwrap();
+            let error = falco_stub::interactive::start_interactive_shell(&session)
+                .await
+                .unwrap_err();
+            eprintln!("{}", error.diagnostic_json());
+            error.exit_code()
+        });
+        assert_eq!(code, 4);
+    }
+
+    #[tokio::test]
+    async fn interactive_start_timeout_exits_with_no_terminal_input() {
+        let port = start_server().await;
+        let (mut master, mut slave) = (-1, -1);
+        // openpty returns two owned file descriptors. Files close each exactly once.
+        let status = unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        assert_eq!(status, 0);
+        let _master = unsafe { std::fs::File::from_raw_fd(master) };
+        let slave = unsafe { std::fs::File::from_raw_fd(slave) };
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "runtime_shutdown::interactive_timeout_child",
+                "--nocapture",
+            ])
+            .env("FALCO_TEST_PTY_PORT", port.to_string())
+            .stdin(Stdio::from(slave.try_clone().unwrap()))
+            .stdout(Stdio::from(slave))
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(4);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                let output = child.wait_with_output().unwrap();
+                assert!(
+                    status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(String::from_utf8_lossy(&output.stderr).contains("SHELL_START_TIMEOUT"));
+                break;
+            }
+            if Instant::now() > deadline {
+                child.kill().unwrap();
+                let output = child.wait_with_output().unwrap();
+                panic!(
+                    "launcher hung after shell startup timeout with no terminal input: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+}

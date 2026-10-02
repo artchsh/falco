@@ -3,16 +3,17 @@
 from shared.config import LauncherConfig
 
 
-def render_how_to_use(config: LauncherConfig, output_name: str, *, filenames: list[str] | None = None) -> str:
+def render_how_to_use(config: LauncherConfig, output_name: str, *, filenames: list[str] | None = None, platforms: dict[str, str] | None = None) -> str:
     name = output_name
     for suffix in (".exe", ".app", ".bin"):
         if name.lower().endswith(suffix):
             name = name[:-len(suffix)]
             break
     files = filenames if filenames is not None else [f"{name}-windows.exe", f"{name}-macos", f"{name}-linux"]
-    invocation = "./" + next((f for f in files if not f.endswith(".exe")), files[0])
-    setup = "\n".join(f"chmod +x {f}" for f in files if not f.endswith(".exe"))
-    mac = next((f for f in files if "macos" in f), next((f for f in files if not f.endswith(".exe")), None))
+    platforms = platforms or {f: "windows" if f.endswith(".exe") else "macos" if "macos" in f else "linux" for f in files}
+    invocation = "./" + next((f for f in files if platforms[f] != "windows"), files[0])
+    setup = "\n".join(f"chmod +x {f}" for f in files if platforms[f] != "windows")
+    mac = next((f for f in files if platforms[f] == "macos"), None)
     quarantine = f"On macOS, right-click → Open once, or run `xattr -d com.apple.quarantine {mac}` if Gatekeeper quarantines the unsigned launcher." if mac else ""
     secret = "private-key passphrase" if config.auth_method == "private_key" else "SSH password"
     key_note = "An encrypted OpenSSH private key is embedded. The passphrase and decrypted key are never embedded or written to a file by Falco." if config.auth_method == "private_key" else "No password is stored in this executable."
@@ -27,7 +28,7 @@ server IP or repeatedly retry a state-changing command.
     return f'''# How to use `{name}`
 
 Standalone SSH launcher for **{config.username}@{config.host}:{config.port}**.
-Authentication: **{config.auth_method}**. Files: {", ".join(f"`{f}`" for f in files)}.
+Authentication: **{config.auth_method}**. Files: {", ".join(f"`{f}` ({platforms[f]})" for f in files)}.
 Use the file for your operating system. Windows runs the `.exe` directly;
 on Unix use `./` before the filename. The examples use `{invocation}`.
 
@@ -61,6 +62,9 @@ On macOS/Linux a copied launcher may need its executable bit restored:
 {invocation} --stdin deploy.sh
 {invocation}                           # interactive terminal
 ```
+
+Use `--` before a remote command to keep local-looking arguments remote, e.g.
+`{invocation} -- git branch --list`.
 
 Commands run only on the remote server. Remote stdout/stderr stream live;
 command execution returns the real remote exit code. Falco does not retry commands.

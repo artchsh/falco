@@ -59,6 +59,18 @@ jobs:
       - name: Lint
         run: cargo clippy --locked --all-targets -- -D warnings
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install binary smoke-test dependencies
+        working-directory: .
+        run: python -m pip install -e ".[dev]"
+
+      - name: Test native launcher assembly and diagnostics
+        working-directory: .
+        run: python -m pytest tests/test_launcher_smoke.py
+
       - name: Report stub size
         shell: bash
         run: ls -l target/release/falco-stub* || true
