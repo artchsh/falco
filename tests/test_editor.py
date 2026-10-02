@@ -14,7 +14,14 @@ def window(monkeypatch):
         probe.destroy()
     except tk.TclError as exc:
         pytest.skip(f"Tk display is unavailable: {exc}")
-    root = app.FalcoEditor()
+    try:
+        root = app.FalcoEditor()
+    except tk.TclError as exc:
+        # Some hosted Windows Python installs lose Tcl initialization between
+        # roots. Only skip this environment error; widget failures must fail.
+        if "Can't find a usable init.tcl" in str(exc):
+            pytest.skip(f"Tk installation is unavailable: {exc}")
+        raise
     root.withdraw()
     yield root
     if not root._closing:
@@ -59,6 +66,10 @@ def test_unresolvable_output_folder_is_reported_without_starting_build(window, m
     window.var_host.set("127.0.0.1")
     window.var_user.set("user")
     window.var_directory.set("~falco-user-that-does-not-exist-9e8a1/output")
+    def fail_expanduser(path):
+        raise RuntimeError("Could not determine home directory")
+    # Windows may resolve ~unknown-user under the current user's parent folder.
+    monkeypatch.setattr(app.Path, "expanduser", fail_expanduser)
     window._on_build()
     assert messages and "folder" in messages[-1].lower()
     assert not window._building

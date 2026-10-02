@@ -103,3 +103,5 @@ Work remains on local branch `improve/reliable-editor-ssh`; nothing was pushed, 
 ## Release follow-up
 
 The user subsequently authorized merging to main, pushing, and publishing a release. Main was fast-forwarded and pushed. The first release gate caught Windows requiring a writable handle for `fsync`; staged files now open with `r+b`, covered by a regression test that fails with the old read-only handle. macOS smoke tests also used a 10-second process deadline shorter than the launcher's 15-second connection timeout; the deadline now allows 25 seconds, including process startup. These fixes preserve the release verification gate rather than bypassing it.
+
+The second Windows verification run confirmed build assembly succeeds. It exposed a GUI-test assumption: Windows can expand an unknown `~user` differently from Unix, so the error test now injects the documented `expanduser` failure. Hosted Python also intermittently fails Tcl initialization between test roots; only the explicit missing `init.tcl` environment error is skipped, while widget/application initialization errors still fail. Local GUI tests passed after these test portability changes.
