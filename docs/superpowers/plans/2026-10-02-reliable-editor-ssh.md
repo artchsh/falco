@@ -99,3 +99,7 @@ Decisions recorded during inline execution:
 3. Drain the real GUI event queue directly in pytest because Tk update under capture can hang locally. Timer scheduling is covered by real UI startup instead of pytest.
 
 Work remains on local branch `improve/reliable-editor-ssh`; nothing was pushed, merged or published.
+
+## Release follow-up
+
+The user subsequently authorized merging to main, pushing, and publishing a release. Main was fast-forwarded and pushed. The first release gate caught Windows requiring a writable handle for `fsync`; staged files now open with `r+b`, covered by a regression test that fails with the old read-only handle. macOS smoke tests also used a 10-second process deadline shorter than the launcher's 15-second connection timeout; the deadline now allows 25 seconds, including process startup. These fixes preserve the release verification gate rather than bypassing it.

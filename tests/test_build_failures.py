@@ -97,3 +97,29 @@ def test_vpn_hint_and_key_setup_are_conditional():
     assert "passphrase" in doc
     assert "HOST_KEY_CHANGED" in doc
     assert key not in doc
+
+
+def test_staged_files_are_writable_when_synced(tmp_path, monkeypatch):
+    """Windows fsync requires a writable handle even after closing the writer."""
+    import errno
+    cfg = setup_stub(tmp_path, monkeypatch)
+    opened = {}
+    original_open = Path.open
+    original_sync = builder.os.fsync
+
+    def track_open(path, *args, **kwargs):
+        stream = original_open(path, *args, **kwargs)
+        if path.parent.name.startswith('.falco-build-'):
+            opened[stream.fileno()] = stream
+        return stream
+
+    def windows_sync(fd):
+        if not opened[fd].writable():
+            raise OSError(errno.EBADF, 'sync requires a writable handle')
+        original_sync(fd)
+
+    monkeypatch.setattr(Path, 'open', track_open)
+    monkeypatch.setattr(builder.os, 'fsync', windows_sync)
+    result = builder.build_launcher(cfg, output_name='server', output_dir=tmp_path / 'out')
+    assert result.executable.exists()
+    assert result.how_to_use.exists()

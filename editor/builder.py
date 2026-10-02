@@ -184,7 +184,8 @@ def _assemble(config: LauncherConfig, output_dir: str | Path, outputs: list[tupl
             (stage / "how-to-use.md").write_text(render_how_to_use(config, config.launcher_name, filenames=names, platforms={name: platform for _, name, platform in stubs}), encoding="utf-8")
             for name in [*names, "how-to-use.md"]:
                 path = stage / name
-                with path.open("rb") as stream:
+                # Windows FlushFileBuffers requires a writable handle.
+                with path.open("r+b") as stream:
                     os.fsync(stream.fileno())
                 os.replace(path, dist / name)
                 written.append(dist / name)

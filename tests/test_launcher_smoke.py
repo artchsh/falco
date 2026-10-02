@@ -38,7 +38,8 @@ def test_generated_launcher_has_structured_network_error_without_prompt(native_s
                                        auth_method="private_key" if private_key else "password", encrypted_private_key=key)
         output = builder.build_launcher(config, output_name="smoke", output_dir=tmp_path)
         result = subprocess.run([str(output.executable), "--accept-new-key", "echo smoke"],
-                                stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
+                                # Allow the launcher's 15s TCP timeout plus process startup.
+                                stdin=subprocess.DEVNULL, capture_output=True, timeout=25)
     assert result.returncode == 4
     assert result.stdout == b""
     error = json.loads(result.stderr)
