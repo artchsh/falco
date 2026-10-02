@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::errors::{FalcoError, FResult};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct LauncherConfig {
     pub launcher_name: String,
     pub host: String,
@@ -23,6 +23,59 @@ pub struct LauncherConfig {
     pub port: u16,
     pub credential_id: String,
     pub schema_version: u32,
+    #[serde(default = "password_auth")]
+    pub auth_method: String,
+    #[serde(default)]
+    pub encrypted_private_key: Option<String>,
+    #[serde(default)]
+    pub requires_vpn: bool,
+}
+
+fn password_auth() -> String { "password".into() }
+
+#[used]
+pub static CAPABILITY_MARKER: [u8; 14] = *b"FALCO_SCHEMA_2";
+
+impl std::fmt::Debug for LauncherConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LauncherConfig").field("host", &self.host)
+            .field("port", &self.port).field("auth_method", &self.auth_method)
+            .finish_non_exhaustive()
+    }
+}
+
+impl LauncherConfig {
+    pub fn validate(&self) -> FResult<()> {
+        let invalid = |message: &str| FalcoError::Config(message.into());
+        if !matches!(self.schema_version, 1 | 2) {
+            return Err(invalid("Unsupported configuration schema. Rebuild this launcher with the current editor."));
+        }
+        if self.port == 0 || [&self.launcher_name, &self.host, &self.username, &self.credential_id]
+            .iter().any(|s| s.trim().is_empty() || s.chars().any(char::is_control)) {
+            return Err(invalid("Invalid server configuration. Rebuild with a host, username and port in 1–65535."));
+        }
+        if self.host.chars().any(char::is_whitespace) || self.host.contains(['/', '\\']) {
+            return Err(invalid("Invalid hostname/IP. Enter an address without a URL or whitespace in the editor."));
+        }
+        match self.auth_method.as_str() {
+            "password" if self.encrypted_private_key.is_none() => (),
+            "private_key" if self.schema_version == 2 => { self.private_key()?; },
+            _ => return Err(invalid("Invalid authentication configuration. Rebuild with password or an encrypted OpenSSH private key.")),
+        }
+        Ok(())
+    }
+
+    pub fn private_key(&self) -> FResult<ssh_key::PrivateKey> {
+        let text = self.encrypted_private_key.as_deref().filter(|s| s.len() <= 128 * 1024)
+            .ok_or_else(|| FalcoError::Config("Missing or oversized encrypted OpenSSH private key. Rebuild the launcher.".into()))?;
+        let key = ssh_key::PrivateKey::from_openssh(text)
+            .map_err(|_| FalcoError::Config("Malformed encrypted OpenSSH private key. Rebuild with a valid key.".into()))?;
+        let valid_kdf = matches!(key.kdf(), ssh_key::Kdf::Bcrypt { salt, rounds } if salt.len() >= 16 && (1..=1024).contains(rounds));
+        if !key.is_encrypted() || !valid_kdf || !matches!(key.cipher(), ssh_key::Cipher::Aes128Ctr | ssh_key::Cipher::Aes192Ctr | ssh_key::Cipher::Aes256Ctr | ssh_key::Cipher::Aes256Cbc) {
+            return Err(FalcoError::Config("The embedded key must be encrypted with AES and 1–1024 bcrypt rounds. Rebuild with an encrypted key.".into()));
+        }
+        Ok(key)
+    }
 }
 
 /// Canonical keyring service name for a launcher. Mirrors the Python
@@ -33,8 +86,10 @@ pub fn default_credential_id(launcher_name: &str, username: &str, host: &str, po
 
 impl LauncherConfig {
     pub fn from_json(text: &str) -> FResult<LauncherConfig> {
-        serde_json::from_str(text)
-            .map_err(|e| FalcoError::Config(format!("Configuration is not valid JSON: {e}")))
+        let config: Self = serde_json::from_str(text)
+            .map_err(|_| FalcoError::Config("Configuration is not valid JSON or has invalid field types. Rebuild this launcher.".into()))?;
+        config.validate()?;
+        Ok(config)
     }
 }
 

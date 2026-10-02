@@ -1,0 +1,83 @@
+# Reliable Editor and SSH Implementation Plan
+
+> **For agentic workers:** Use superpowers:executing-plans inline, as explicitly requested by the user. Steps use checkbox syntax for tracking. Human review gates are waived by the user.
+
+**Goal:** Reliable, polished launcher builds and portable, host-verified SSH authentication with actionable errors for agents.
+
+**Architecture:** Extend the existing Python/Tk editor and Rust launcher. Shared schema describes authentication and network requirements. Isolate build events, host trust and diagnostic formatting from GUI/SSH transport code.
+
+**Tech Stack:** Python 3.12+, Tk/ttk, pytest; Rust, tokio, russh, russh-sftp, keyring, serde_json.
+
+**Spec:** `docs/superpowers/specs/2026-10-02-reliable-editor-ssh-design.md`
+
+## Global Constraints
+
+- Preserve portable prebuilt-stub assembly and all three OS targets.
+- Embed only encrypted OpenSSH private keys; never embed passwords/passphrases.
+- Schema 2; accept legacy schema 1; reject unsupported schemas.
+- JSON errors on stderr; exit groups 2, 3, 4; preserve real remote status.
+- First-seen host trust, reject changed keys; override only with `--accept-new-key`.
+- No extra human review gates or per-task implementation agents.
+- Work on feature branch `improve/reliable-editor-ssh`; keep changes reviewable locally.
+
+## Review Focus
+
+- Malformed/truncated/enormous OpenSSH envelopes must fail without secret output (Task 1).
+- Invalid/reserved/path output names and write interruption must preserve existing destinations (Task 2).
+- Changing embedded key must not reuse another key's passphrase (Task 3).
+- Trust-store failures and early remote close must never succeed (Task 3).
+- Closing Tk while a worker finishes must not access destroyed widgets (Task 4).
+
+### Task 1: Shared configuration and safe key embedding
+
+**Files:** `shared/config.py`, new `shared/ssh_keys.py`, `tests/test_config.py`, new key tests, Rust `config.rs` and config tests.
+
+**Interfaces:** `LauncherConfig.create(..., auth_method='password', encrypted_private_key=None, requires_vpn=False)`; serialized schema 2. `validate_encrypted_private_key(text: str) -> str` validates the OpenSSH envelope, returns normalized text. Rust config mirrors fields and validates on `from_json`.
+
+- [ ] Write tests: schema 1 defaults; schema 2 key/VPN round trip; invalid types and schema rejection; encrypted key accepted, plaintext/truncated key rejected without leaking input.
+- [ ] Run `.venv/bin/python -m pytest tests/test_config.py tests/test_ssh_keys.py`; expect failures for missing behavior.
+- [ ] Implement Python schema/key validation and equivalent Rust config validation. Add runtime capability marker `FALCO_SCHEMA_2` to stub.
+- [ ] Run config/key tests and Rust config tests; expect pass.
+
+### Task 2: Reliable build assembly and guides
+
+**Files:** `editor/builder.py`, `editor/templates.py`, `build/build_launcher.py`, `tests/test_builder.py`, new build failure tests.
+
+**Interfaces:** `validate_output_name(output_name: str) -> str`; `build_launcher`/`build_all_launchers` existing return types, explicit target filenames passed to guide renderer; CLI flags `--private-key`, `--requires-vpn`, `--all-platforms`.
+
+- [ ] Write tests for unsafe/reserved basenames, failed staged writes preserving existing launchers, cleanup, schema-capability mismatch and actual filenames/VPN/auth guidance.
+- [ ] Run builder tests; expect failures for missing validation/atomicity/capability checks.
+- [ ] Implement validated staged writes, meaningful filesystem failures, capability check and conditional guide sections; update build CLI.
+- [ ] Run Python suite; expect pass.
+
+### Task 3: SSH trust, authentication and diagnostics
+
+**Files:** Rust `errors.rs`, `cli.rs`, `credentials.rs`, `ssh.rs`, new `host_keys.rs`, `main.rs`, `interactive.rs`, `sftp.rs`, CLI/config/SSH tests and credential fixtures.
+
+**Interfaces:** `FalcoError` carries stable code/message/action; `diagnostic_json` emits structured stderr. `LaunchRequest.accept_new_key: bool`. `KeyStore` remains injectable. `connect` verifies trust before resolving authentication and saves prompted credentials after successful auth. Separate host-pin and key-passphrase service IDs.
+
+- [ ] Write tests for flag behavior and JSON, first use/changed key/explicit update/store failure, noninteractive setup, wrong password/passphrase, separate key identity, and real encrypted-key SSH auth.
+- [ ] Run Rust tests; expect failures for absent behavior.
+- [ ] Implement host pinning, bounded DNS/TCP/handshake/auth/session startup, encrypted key decrypt/public-key authentication, TTY-only prompt, post-auth save, structured recovery actions and VPN hints.
+- [ ] Add tests for no exit status and remote signals; run red, implement correct failure propagation; preserve remote status and stdout.
+- [ ] Run Rust suite; expect pass. Format and lint.
+
+### Task 4: Editor usability and UI
+
+**Files:** `editor/app.py`, new `editor/build_jobs.py`, GUI/build-worker tests.
+
+**Interfaces:** queued progress/success/failure events; worker handles Python exceptions and never touches Tk. GUI polls queue and updates build controls on main thread.
+
+- [ ] Write worker tests for success, FalcoError, unexpected filesystem error and safe delayed completion; run red.
+- [ ] Implement queue-based worker, grouped ttk form, key picker/auth controls, VPN checkbox, available-platform choices, consistent name defaults, replacement confirmation, folder action and readable status/log.
+- [ ] Run worker/Python tests; expect pass. Launch actual Tk UI and inspect where available.
+
+### Task 5: Release checks, documentation and verification
+
+**Files:** `.github/workflows/release.yml`, README, plan checkboxes and execution ledger; new assembly/runtime smoke tests where needed.
+
+- [ ] Make release publication depend on successful Python/Rust verification; use locked Rust builds.
+- [ ] Update README to accurately document encrypted keys, host trust, JSON errors, VPN hint, first-run user setup and supported formats.
+- [ ] Run `.venv/bin/python -m pytest`, `cargo test --locked`, `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`, and `cargo build --locked --release` in the Rust crate. Expected all pass.
+- [ ] Assemble and run a configured release launcher in noninteractive mode; expect structured setup/connection error, never a hang or secret output.
+- [ ] Review the full diff with one fresh reviewer as required by inline execution skill, fix material findings and rerun affected checks. Leave final implementation on the local feature branch without publishing.

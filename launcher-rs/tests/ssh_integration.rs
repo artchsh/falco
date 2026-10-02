@@ -26,6 +26,9 @@ fn cfg(port: u16) -> LauncherConfig {
         port,
         credential_id: "it".into(),
         schema_version: 1,
+        auth_method: "password".into(),
+        encrypted_private_key: None,
+        requires_vpn: false,
     }
 }
 

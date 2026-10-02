@@ -125,6 +125,9 @@ mod tests {
             port: 22,
             credential_id: "cid".into(),
             schema_version: 1,
+            auth_method: "password".into(),
+            encrypted_private_key: None,
+            requires_vpn: false,
         }
     }
 

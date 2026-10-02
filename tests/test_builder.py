@@ -29,7 +29,7 @@ def test_append_config_writes_trailer() -> None:
     json_bytes = blob[-16 - length : -16]
     assert b'"host": "1.2.3.4"' in json_bytes or b'"host":"1.2.3.4"' in json_bytes
     # No password field can leak into the trailer — the type has none.
-    assert b"password" not in json_bytes
+    assert b'"password":' not in json_bytes
 
 
 def test_append_config_embeds_all_nonsecret_fields() -> None:

@@ -52,7 +52,7 @@ def test_roundtrip_json_preserves_fields() -> None:
 def test_serialised_config_never_contains_a_password() -> None:
     cfg = LauncherConfig.create(launcher_name="server-client-X", host="h", username="u")
     text = cfg.to_json().lower()
-    assert "password" not in text
+    assert '"password":' not in text
     assert set(cfg.to_dict()) == {
         "launcher_name",
         "host",
@@ -60,6 +60,9 @@ def test_serialised_config_never_contains_a_password() -> None:
         "port",
         "credential_id",
         "schema_version",
+        "auth_method",
+        "encrypted_private_key",
+        "requires_vpn",
     }
 
 
@@ -77,3 +80,20 @@ def test_config_is_immutable() -> None:
     cfg = LauncherConfig.create(launcher_name="server-client-X", host="h", username="u")
     with pytest.raises(Exception):
         cfg.host = "evil"  # type: ignore[misc]
+
+
+def test_legacy_config_defaults_to_password():
+    cfg = LauncherConfig.from_json('{"launcher_name":"n","host":"h","username":"u","schema_version":1}')
+    assert cfg.auth_method == "password"
+    assert cfg.requires_vpn is False
+
+
+@pytest.mark.parametrize("field,value", [
+    ("schema_version", 99), ("port", True), ("port", "22"),
+    ("host", 123), ("requires_vpn", "false"), ("auth_method", "unknown"),
+    ("encrypted_private_key", "unencrypted"),
+])
+def test_rejects_invalid_serialized_fields(field, value):
+    data = {"launcher_name": "n", "host": "h", "username": "u", field: value}
+    with pytest.raises(ConfigError):
+        LauncherConfig.from_dict(data)

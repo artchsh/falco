@@ -21,7 +21,7 @@ from shared.errors import ConfigError
 DEFAULT_SSH_PORT = 22
 
 # Bump when the on-disk / embedded schema changes in a breaking way.
-CONFIG_SCHEMA_VERSION = 1
+CONFIG_SCHEMA_VERSION = 2
 
 
 def default_credential_id(launcher_name: str, username: str, host: str, port: int) -> str:
@@ -45,6 +45,9 @@ class LauncherConfig:
     port: int = DEFAULT_SSH_PORT
     credential_id: str = ""
     schema_version: int = CONFIG_SCHEMA_VERSION
+    auth_method: str = "password"
+    encrypted_private_key: str | None = field(default=None, repr=False)
+    requires_vpn: bool = False
 
     @classmethod
     def create(
@@ -55,9 +58,26 @@ class LauncherConfig:
         username: str,
         port: int = DEFAULT_SSH_PORT,
         credential_id: str | None = None,
+        auth_method: str = "password",
+        encrypted_private_key: str | None = None,
+        requires_vpn: bool = False,
     ) -> "LauncherConfig":
         """Validate inputs and build a config, deriving ``credential_id`` if absent."""
 
+        for label, value in (("Launcher name", launcher_name), ("SSH host", host), ("SSH username", username)):
+            if not isinstance(value, str):
+                raise ConfigError(f"{label} must be text.")
+        if credential_id is not None and not isinstance(credential_id, str):
+            raise ConfigError("Credential ID must be text.")
+        if not isinstance(requires_vpn, bool):
+            raise ConfigError("VPN requirement must be a boolean.")
+        if auth_method not in ("password", "private_key"):
+            raise ConfigError("Choose password or private-key authentication.")
+        if auth_method == "private_key":
+            from shared.ssh_keys import validate_encrypted_private_key
+            encrypted_private_key = validate_encrypted_private_key(encrypted_private_key)
+        elif encrypted_private_key is not None:
+            raise ConfigError("A private key requires private-key authentication.")
         name = launcher_name.strip()
         host_value = host.strip()
         user = username.strip()
@@ -68,6 +88,10 @@ class LauncherConfig:
             raise ConfigError("SSH host/IP must not be empty.")
         if not user:
             raise ConfigError("SSH username must not be empty.")
+        if any(ch.isspace() or ord(ch) < 32 for ch in host_value) or "/" in host_value or "\\" in host_value:
+            raise ConfigError("Enter a hostname or IP address without a URL, path, or whitespace.")
+        if any(ord(ch) < 32 for ch in name + user):
+            raise ConfigError("Launcher name and SSH username must not contain control characters.")
         if not isinstance(port, int) or isinstance(port, bool):
             raise ConfigError("SSH port must be an integer.")
         if not (1 <= port <= 65535):
@@ -82,6 +106,9 @@ class LauncherConfig:
             username=user,
             port=port,
             credential_id=cred,
+            auth_method=auth_method,
+            encrypted_private_key=encrypted_private_key,
+            requires_vpn=requires_vpn,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -94,13 +121,21 @@ class LauncherConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "LauncherConfig":
+        version = data.get("schema_version", 1)
+        if type(version) is not int or version not in (1, 2):
+            raise ConfigError("Unsupported configuration schema; rebuild with a current Falco editor.")
+        if version == 1 and (data.get("auth_method", "password") != "password" or data.get("encrypted_private_key") is not None):
+            raise ConfigError("Private-key authentication requires schema 2.")
         try:
             return cls.create(
                 launcher_name=data["launcher_name"],
                 host=data["host"],
                 username=data["username"],
-                port=int(data.get("port", DEFAULT_SSH_PORT)),
+                port=data.get("port", DEFAULT_SSH_PORT),
                 credential_id=data.get("credential_id"),
+                auth_method=data.get("auth_method", "password"),
+                encrypted_private_key=data.get("encrypted_private_key"),
+                requires_vpn=data.get("requires_vpn", False),
             )
         except KeyError as exc:  # pragma: no cover - defensive
             raise ConfigError(f"Missing required config field: {exc.args[0]}") from exc
